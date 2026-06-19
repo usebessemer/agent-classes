@@ -1,4 +1,4 @@
-# Bookkeeper — agent class charter (v0.1)
+# Bookkeeper: agent class charter (v0.1)
 
 > `Bookkeeper` is the (**Executor**, **Standing**) binding from the [agent-role topology](https://github.com/usebessemer/research/blob/main/theory/agent-role-topology.md), the standing variant: it wakes on a recurring schedule against a durable charter, not a per-task spec with a PR. Status: v0.1 (a target skeleton). The first concrete class in the library.
 

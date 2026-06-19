@@ -1,4 +1,4 @@
-# &lt;ClassName&gt; — agent class charter (template)
+# &lt;ClassName&gt;: agent class charter (template)
 
 > `<ClassName>` is the (**&lt;Position&gt;**, **&lt;Lifecycle&gt;**, &lt;domain&gt;) binding from the [agent-role topology](https://github.com/usebessemer/research/blob/main/theory/agent-role-topology.md). Position is `Lead` or `Executor`; lifecycle is `Standing` (durable charter, scheduled, persists) or `Ephemeral` (per-task spec, opens a review artifact, terminates). Keep every per-deployment value in the §3 fields, never in the body.
 
@@ -12,7 +12,7 @@ What this class explicitly does **not** do, especially the adjacent ambitions mo
 
 ## 3. Context (per-instance fields, the class/instance seam)
 
-The state the class holds. **Every value is set per instance; none live in the class body** — this is what makes the class reusable. A table of `fieldName` | what it is. Instance values and client data live in the private client repo, never in this library.
+The state the class holds. **Every value is set per instance; none live in the class body**, this is what makes the class reusable. A table of `fieldName` | what it is. Instance values and client data live in the private client repo, never in this library.
 
 ## 4. Skills (methods)
 
