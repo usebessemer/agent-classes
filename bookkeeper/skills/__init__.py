@@ -10,8 +10,18 @@ Built here:
 - `track_tax` — break out + total reclaimable tax per attribution target and
   period (charter `trackTax`). Returns a *proposed* `TaxSummary`; per §5.4 it
   writes nothing canonical. Tax regime selected by `config.tax_regime`.
+- `categorize` — propose a chart account per transaction (charter
+  `categorizeTransaction`). Returns a *proposed* `CategorizationReport`; per
+  §5.4 it writes nothing canonical. Categories come from
+  `config.chart_of_accounts`; never invents one (§5.2).
 """
 
+from bookkeeper.skills.categorize import (
+    CategorizationReport,
+    CategoryFlag,
+    CategoryProposal,
+    categorize,
+)
 from bookkeeper.skills.track_tax import (
     HstRegime,
     TargetTax,
@@ -34,4 +44,8 @@ __all__ = [
     "HstRegime",
     "select_regime",
     "UnknownTaxRegime",
+    "categorize",
+    "CategorizationReport",
+    "CategoryProposal",
+    "CategoryFlag",
 ]
