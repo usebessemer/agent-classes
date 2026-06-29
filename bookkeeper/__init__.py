@@ -26,6 +26,18 @@ from bookkeeper.ports import (
     Extractor,
     IntakeSource,
     LedgerSink,
+    LedgerSource,
+)
+from bookkeeper.skills import (
+    HstRegime,
+    TargetTax,
+    TaxFlag,
+    TaxLine,
+    TaxRegime,
+    TaxSummary,
+    UnknownTaxRegime,
+    select_regime,
+    track_tax,
 )
 
 __version__ = "0.1.0"
@@ -41,6 +53,7 @@ __all__ = [
     "Extractor",
     "AttributionResolver",
     "LedgerSink",
+    "LedgerSource",
     # contracts A/B
     "PackageWriter",
     "ReviewQueue",
@@ -54,4 +67,14 @@ __all__ = [
     "ATTRIBUTION_SKILL",
     # orchestrator (§5 spine)
     "StandingRun",
+    # skills (§4 computation)
+    "track_tax",
+    "TaxSummary",
+    "TargetTax",
+    "TaxFlag",
+    "TaxLine",
+    "TaxRegime",
+    "HstRegime",
+    "select_regime",
+    "UnknownTaxRegime",
 ]

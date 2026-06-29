@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 from bookkeeper.config import BookkeeperConfig
 from bookkeeper.contracts import Notifier, ReviewQueue, RunLog, RunLogEntry
 from bookkeeper.model import ExtractedTransaction, IntakeItem, Transaction
-from bookkeeper.ports import AttributionResolver, Extractor, IntakeSource, LedgerSink
+from bookkeeper.ports import (
+    AttributionResolver,
+    Extractor,
+    IntakeSource,
+    LedgerSink,
+    LedgerSource,
+)
 
 # A fixed timestamp so tests are deterministic (no wall-clock reads).
 _FIXED_DATE = datetime(2026, 5, 15, 10, 0, 0, tzinfo=timezone.utc)
@@ -25,6 +31,34 @@ def make_item(intake_id: str = "item-001", source_hint: str = "Acme Supplies, Ma
         artifact_bytes=b"fake artifact bytes",
         source_hint=source_hint,
         received_at=_FIXED_DATE,
+    )
+
+
+def make_transaction(
+    *,
+    attribution_target_id: str = "target-001",
+    vendor: str = "Acme Supplies",
+    amount: float = 45.99,
+    tax: float = 3.50,
+    date: datetime | None = None,
+    description: str = "",
+    artifact_bytes: bytes = b"",
+) -> Transaction:
+    """Build a stored transaction for read-side / totalling tests.
+
+    `artifact_bytes` defaults to empty, mirroring the `LedgerSource` read-path
+    projection (the computation skills total figures; an adapter may omit the
+    source blob on the read path). Pass `tax=...` (incl. negatives for refunds)
+    to drive the regime totals.
+    """
+    return Transaction(
+        attribution_target_id=attribution_target_id,
+        vendor=vendor,
+        amount=amount,
+        tax=tax,
+        date=date or _FIXED_DATE,
+        description=description,
+        artifact_bytes=artifact_bytes,
     )
 
 
@@ -109,6 +143,39 @@ class FakeLedgerSink(LedgerSink):
         if self.error is not None:
             raise self.error
         self.stored.append(transaction)
+
+
+class FakeLedgerSource(LedgerSource):
+    """In-memory read-side ledger: yields the seeded transactions for a period."""
+
+    def __init__(self, by_period: dict[str, list[Transaction]] | None = None):
+        self.by_period = {p: list(txns) for p, txns in (by_period or {}).items()}
+        self.fetched: list[str] = []  # periods requested, in order
+
+    async def fetch_for_period(self, period: str) -> list[Transaction]:
+        self.fetched.append(period)
+        return list(self.by_period.get(period, []))
+
+
+class FakeLedger(LedgerSource, LedgerSink):
+    """Combined read+write fake — one store an adapter implements both ports against.
+
+    Mirrors the real shape (the instance adapter implements `LedgerSink` and
+    `LedgerSource` against the same store), so a test can prove a read-side skill
+    like `track_tax` writes nothing canonical: `store_calls` stays empty.
+    """
+
+    def __init__(self, by_period: dict[str, list[Transaction]] | None = None):
+        self.by_period = {p: list(txns) for p, txns in (by_period or {}).items()}
+        self.fetched: list[str] = []
+        self.store_calls: list[Transaction] = []  # any write the skill must NOT make
+
+    async def fetch_for_period(self, period: str) -> list[Transaction]:
+        self.fetched.append(period)
+        return list(self.by_period.get(period, []))
+
+    async def store(self, transaction: Transaction) -> None:
+        self.store_calls.append(transaction)
 
 
 class FakeReviewQueue(ReviewQueue):

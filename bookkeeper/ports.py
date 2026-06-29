@@ -10,7 +10,8 @@ private instance repo — never in this framework.
 | `IntakeSource`        | `intakeTransaction`    | `intakeChannel` |
 | `Extractor`           | `extractFields`        | —               |
 | `AttributionResolver` | `attributeTransaction` | `attributionTargets` |
-| `LedgerSink`          | (store)                | `booksLocation` |
+| `LedgerSink`          | (store, write)         | `booksLocation` |
+| `LedgerSource`        | (read)                 | `booksLocation` |
 
 The escalation port `ReviewQueue` (charter `flagException`) is part of the
 Contract B review substrate and lives in `contracts.py`.
@@ -75,3 +76,25 @@ class LedgerSink(ABC):
     @abstractmethod
     async def store(self, transaction: Transaction) -> None:
         """Persist an attributed transaction."""
+
+
+class LedgerSource(ABC):
+    """Reads stored transactions back from the ledger (read side of §3 `booksLocation`).
+
+    The read complement to `LedgerSink`. The write path (`StandingRun`) files
+    transactions; the computation skills (`trackTax` and, later, reconcile /
+    closePeriod) read a period back to total and compare. An instance adapter
+    implements both `LedgerSink` (write) and `LedgerSource` (read) against the
+    same store, so the framework reads exactly what it filed.
+
+    Read-path projection: the computation skills total figures, they do not need
+    the source bytes. An adapter MAY omit heavy fields on this path (return
+    `Transaction.artifact_bytes = b""`) rather than load every blob to sum
+    numbers; the figure stays traceable through the ledger row itself. Aggregation
+    is the framework's job, not the adapter's: an adapter returns the period's
+    transactions, the regime rules and totalling live in the skill.
+    """
+
+    @abstractmethod
+    async def fetch_for_period(self, period: str) -> list[Transaction]:
+        """Return all stored transactions for `period` (e.g. "2026-Q2")."""
