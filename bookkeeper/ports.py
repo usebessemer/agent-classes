@@ -49,6 +49,12 @@ class Extractor(ABC):
     ) -> ExtractedTransaction:
         """Extract structured transaction fields from a source artifact.
 
+        Money fields (`amount`, `tax`) are `Decimal` — exact currency, never
+        `float`. Absent / NULL tax is the adapter's to coalesce: construct the
+        `ExtractedTransaction` with `tax=Decimal("0")`, never `None`. The
+        framework holds no None-money, so no downstream skill has to re-launder
+        a float or guard a missing value.
+
         Args:
             artifact_bytes: The raw source artifact (image, PDF, CSV row, ...).
             source_hint: Channel-provided hint (subject/memo/filename), or "".
@@ -93,6 +99,11 @@ class LedgerSource(ABC):
     numbers; the figure stays traceable through the ledger row itself. Aggregation
     is the framework's job, not the adapter's: an adapter returns the period's
     transactions, the regime rules and totalling live in the skill.
+
+    Money is `Decimal`, never `float` (exact currency). A ledger that stores tax
+    nullable must coalesce NULL → `Decimal("0")` when reconstructing the model
+    (the SQL `COALESCE(tax, 0)` belongs on this side of the line), so the
+    framework totals exact Decimals and never None-money.
     """
 
     @abstractmethod

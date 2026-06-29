@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 
 
 @dataclass(frozen=True)
@@ -48,11 +49,16 @@ class ExtractedTransaction:
     No attribution and no category: extraction reports what the artifact says,
     not where it belongs. Attribution is the resolver's job; categorization is a
     later, review-gated skill.
+
+    Money is `Decimal`, never `float` (currency is exact, float is lossy). An
+    `Extractor` adapter constructs these from its source; absent / NULL tax is
+    the adapter's to coalesce to `Decimal("0")` at the boundary, so the framework
+    never holds None-money (see `Extractor.extract`).
     """
 
     vendor: str
-    amount: float
-    tax: float
+    amount: Decimal
+    tax: Decimal
     date: datetime
     description: str
 
@@ -65,12 +71,16 @@ class Transaction:
     single piece of state that distinguishes an auto-fileable transaction from
     one that must go to review. Carries the source `artifact_bytes` so every
     stored figure stays linked to its source (charter §1: fully traceable).
+
+    Money is `Decimal` (exact currency). On the read path, a `LedgerSource`
+    adapter reconstructs these from the ledger and coalesces absent / NULL tax to
+    `Decimal("0")` before constructing the model (see `LedgerSource`).
     """
 
     attribution_target_id: str
     vendor: str
-    amount: float
-    tax: float
+    amount: Decimal
+    tax: Decimal
     date: datetime
     description: str
     artifact_bytes: bytes

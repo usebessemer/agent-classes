@@ -3,13 +3,18 @@
 Each test pins one bullet of the issue's acceptance criteria:
 
 - per-target + period HST totals over a fake `LedgerSource`, in `Decimal`
-- NULL / absent tax → 0
+- absent tax (adapter-coalesced to `Decimal("0")`) → contributes 0
 - totals are exact `Decimal` (not float), proven on a case float gets wrong
 - `TaxRegime` seam: only HST registered; an unknown `tax_regime` fails fast
 - §5.4: `track_tax` writes nothing canonical (only reads) — proposed, not published
 - §5.3: tax with no resolvable target is flagged, not silently totalled
 - HST totals match the reference's semantics (sum of captured tax per target,
   refunds signed negative reduce the total) on a representative fixture
+
+Money is `Decimal` at the model (exact currency); absent / NULL tax is the
+adapter's to coalesce to `Decimal("0")` at the boundary, so these fixtures pass
+`Decimal("0")` for the no-tax case rather than `None` — the framework holds no
+None-money.
 """
 
 from decimal import Decimal
@@ -40,9 +45,9 @@ async def test_per_target_and_period_totals_in_decimal():
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-a", tax=10.00),
-                make_transaction(attribution_target_id="target-a", tax=5.25),
-                make_transaction(attribution_target_id="target-b", tax=2.50),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("10.00")),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("5.25")),
+                make_transaction(attribution_target_id="target-b", tax=Decimal("2.50")),
             ]
         }
     )
@@ -69,9 +74,9 @@ async def test_per_target_ordering_is_deterministic():
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-c", tax=1.00),
-                make_transaction(attribution_target_id="target-a", tax=1.00),
-                make_transaction(attribution_target_id="target-b", tax=1.00),
+                make_transaction(attribution_target_id="target-c", tax=Decimal("1.00")),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("1.00")),
+                make_transaction(attribution_target_id="target-b", tax=Decimal("1.00")),
             ]
         }
     )
@@ -83,17 +88,22 @@ async def test_per_target_ordering_is_deterministic():
     ]
 
 
-# --- NULL / absent tax → 0 --------------------------------------------------
+# --- absent tax → 0 ---------------------------------------------------------
 
 
 async def test_absent_tax_counts_as_zero():
-    """Transactions with absent (None) or zero tax contribute 0, not an error."""
+    """Zero / absent tax contributes 0, not an error.
+
+    Absent (NULL) tax is coalesced to `Decimal("0")` by the `LedgerSource`
+    adapter at the boundary, so the framework only ever sees `Decimal("0")` here
+    — a zero-tax row is still a traceable member of the target, just 0.
+    """
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-a", tax=12.00),
-                make_transaction(attribution_target_id="target-a", tax=0.0),
-                make_transaction(attribution_target_id="target-a", tax=None),  # NULL
+                make_transaction(attribution_target_id="target-a", tax=Decimal("12.00")),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("0")),  # zero tax
+                make_transaction(attribution_target_id="target-a", tax=Decimal("0")),  # absent → coalesced
             ]
         }
     )
@@ -102,7 +112,7 @@ async def test_absent_tax_counts_as_zero():
     target_a = summary.per_target[0]
     assert target_a.attribution_target_id == "target-a"
     assert target_a.reclaimable == Decimal("12.00")
-    # The zero / NULL rows are still traceable members of the target, just 0 each.
+    # The zero rows are still traceable members of the target, just 0 each.
     assert target_a.transaction_count == 3
     assert summary.period_total == Decimal("12.00")
 
@@ -112,8 +122,8 @@ async def test_target_with_only_untaxed_transactions_reports_zero():
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-z", tax=0.0),
-                make_transaction(attribution_target_id="target-z", tax=None),
+                make_transaction(attribution_target_id="target-z", tax=Decimal("0")),
+                make_transaction(attribution_target_id="target-z", tax=Decimal("0")),
             ]
         }
     )
@@ -130,8 +140,8 @@ async def test_totals_are_exact_decimal_not_float():
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-a", tax=0.10),
-                make_transaction(attribution_target_id="target-a", tax=0.20),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("0.10")),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("0.20")),
             ]
         }
     )
@@ -157,7 +167,7 @@ async def test_hst_regime_selected_case_insensitively():
 async def test_unknown_regime_fails_fast():
     """An unregistered tax_regime raises (never silently totals nothing)."""
     source = FakeLedgerSource(
-        by_period={"2026-Q2": [make_transaction(tax=10.0)]}
+        by_period={"2026-Q2": [make_transaction(tax=Decimal("10.0"))]}
     )
     for unknown in ("VAT", "US-SALES", "standard"):
         with pytest.raises(UnknownTaxRegime):
@@ -166,7 +176,7 @@ async def test_unknown_regime_fails_fast():
 
 async def test_unknown_regime_fails_before_reading():
     """Fail-fast happens before any ledger read — a clear error, not a partial run."""
-    source = FakeLedgerSource(by_period={"2026-Q2": [make_transaction(tax=10.0)]})
+    source = FakeLedgerSource(by_period={"2026-Q2": [make_transaction(tax=Decimal("10.0"))]})
     with pytest.raises(UnknownTaxRegime):
         await track_tax(source, _hst_config(tax_regime="VAT"), "2026-Q2")
     assert source.fetched == []  # never reached the read
@@ -184,8 +194,8 @@ async def test_writes_nothing_canonical():
     ledger = FakeLedger(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-a", tax=10.00),
-                make_transaction(attribution_target_id="target-b", tax=5.00),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("10.00")),
+                make_transaction(attribution_target_id="target-b", tax=Decimal("5.00")),
             ]
         }
     )
@@ -204,9 +214,9 @@ async def test_tax_without_target_is_flagged_not_totalled():
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-a", tax=10.00),
-                make_transaction(attribution_target_id="", tax=4.00),  # tax, no target
-                make_transaction(attribution_target_id="   ", tax=1.00),  # blank target
+                make_transaction(attribution_target_id="target-a", tax=Decimal("10.00")),
+                make_transaction(attribution_target_id="", tax=Decimal("4.00")),  # tax, no target
+                make_transaction(attribution_target_id="   ", tax=Decimal("1.00")),  # blank target
             ]
         }
     )
@@ -226,8 +236,8 @@ async def test_untaxed_untargeted_transaction_is_neither_totalled_nor_flagged():
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-a", tax=7.00),
-                make_transaction(attribution_target_id="", tax=0.0),  # nothing to do
+                make_transaction(attribution_target_id="target-a", tax=Decimal("7.00")),
+                make_transaction(attribution_target_id="", tax=Decimal("0")),  # nothing to do
             ]
         }
     )
@@ -241,22 +251,23 @@ async def test_untaxed_untargeted_transaction_is_neither_totalled_nor_flagged():
 
 
 async def test_matches_reference_semantics_sum_per_target():
-    """HST totals = sum of captured tax per target, NULL→0, refunds reduce the total.
+    """HST totals = sum of captured tax per target, absent→0, refunds reduce the total.
 
     A representative fixture mirroring instance #1's per-project HST report: a
     target accrues reclaimable HST across many transactions; a refund (signed
-    negative) reduces it; a NULL-tax historical row contributes 0.
+    negative) reduces it; an absent-tax historical row (coalesced to
+    `Decimal("0")` by the adapter) contributes 0.
     """
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                # target-a: supplies + production costs, one refund, one NULL row.
-                make_transaction(attribution_target_id="target-a", vendor="Supplier 1", tax=13.00),
-                make_transaction(attribution_target_id="target-a", vendor="Supplier 2", tax=7.80),
-                make_transaction(attribution_target_id="target-a", vendor="Refund", tax=-2.60),
-                make_transaction(attribution_target_id="target-a", vendor="Historical", tax=None),
+                # target-a: supplies + production costs, one refund, one no-tax row.
+                make_transaction(attribution_target_id="target-a", vendor="Supplier 1", tax=Decimal("13.00")),
+                make_transaction(attribution_target_id="target-a", vendor="Supplier 2", tax=Decimal("7.80")),
+                make_transaction(attribution_target_id="target-a", vendor="Refund", tax=Decimal("-2.60")),
+                make_transaction(attribution_target_id="target-a", vendor="Historical", tax=Decimal("0")),  # absent → 0
                 # target-b: a single taxed expense.
-                make_transaction(attribution_target_id="target-b", vendor="Catering", tax=9.10),
+                make_transaction(attribution_target_id="target-b", vendor="Catering", tax=Decimal("9.10")),
             ]
         }
     )
@@ -274,8 +285,8 @@ async def test_refund_negative_tax_reduces_target_total():
     source = FakeLedgerSource(
         by_period={
             "2026-Q2": [
-                make_transaction(attribution_target_id="target-a", tax=22.19),
-                make_transaction(attribution_target_id="target-a", tax=-22.19),  # full refund
+                make_transaction(attribution_target_id="target-a", tax=Decimal("22.19")),
+                make_transaction(attribution_target_id="target-a", tax=Decimal("-22.19")),  # full refund
             ]
         }
     )

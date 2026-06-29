@@ -12,6 +12,8 @@ Each test pins one bullet of the §5 contract:
 - Contract B: run log + wake notification are driven correctly
 """
 
+from decimal import Decimal
+
 from bookkeeper.contracts import RunOutcome
 from bookkeeper.orchestrator import StandingRun
 from tests.fakes import (
@@ -64,8 +66,8 @@ async def test_confident_match_auto_files_end_to_end():
     assert len(sink.stored) == 1
     txn = sink.stored[0]
     assert txn.vendor == "Acme Supplies"
-    assert txn.amount == 45.99
-    assert txn.tax == 3.50
+    assert txn.amount == Decimal("45.99")
+    assert txn.tax == Decimal("3.50")
     assert txn.attribution_target_id == "target-001"
     assert txn.artifact_bytes == b"fake artifact bytes"
 
