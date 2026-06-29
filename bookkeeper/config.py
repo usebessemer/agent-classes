@@ -28,6 +28,11 @@ from types import MappingProxyType
 # Its presence is what flips the boundary from inert to live (see §5).
 ATTRIBUTION_SKILL = "attribution"
 
+# Well-known key in `confidence_thresholds` for the categorize→propose boundary.
+# Its presence is what flips `categorize` from inert (everything surfaced for
+# attention) to live (confident matches pre-filled as proposals) — see §5.
+CATEGORIZE_SKILL = "categorize"
+
 # The §3 fields an instance must declare to be operable. The boundary-governing
 # fields are intentionally absent — unset leaves the boundary inert, not broken.
 _REQUIRED: tuple[str, ...] = (
@@ -132,3 +137,14 @@ class BookkeeperConfig:
         auto-filing before its boundary is configured.
         """
         return self.confidence_thresholds.get(ATTRIBUTION_SKILL)
+
+    def categorize_threshold(self) -> float | None:
+        """The categorize→propose confidence cutoff, or `None` when unset.
+
+        `None` is the §5 *inert* signal for `categorize` (mirrors
+        `attribution_threshold`): the skill surfaces every transaction for human
+        attention rather than pre-filling any as a confident proposal, so no
+        instance goes live with auto-pre-filled categories before its boundary
+        is configured.
+        """
+        return self.confidence_thresholds.get(CATEGORIZE_SKILL)

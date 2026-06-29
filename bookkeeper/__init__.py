@@ -10,7 +10,12 @@ Nothing here is client- or system-specific. Adapters and instance config live
 in the private instance repo — never in this package.
 """
 
-from bookkeeper.config import ATTRIBUTION_SKILL, BookkeeperConfig, ConfigError
+from bookkeeper.config import (
+    ATTRIBUTION_SKILL,
+    CATEGORIZE_SKILL,
+    BookkeeperConfig,
+    ConfigError,
+)
 from bookkeeper.contracts import (
     Notifier,
     PackageWriter,
@@ -29,6 +34,9 @@ from bookkeeper.ports import (
     LedgerSource,
 )
 from bookkeeper.skills import (
+    CategorizationReport,
+    CategoryFlag,
+    CategoryProposal,
     HstRegime,
     TargetTax,
     TaxFlag,
@@ -36,6 +44,7 @@ from bookkeeper.skills import (
     TaxRegime,
     TaxSummary,
     UnknownTaxRegime,
+    categorize,
     select_regime,
     track_tax,
 )
@@ -65,6 +74,7 @@ __all__ = [
     "BookkeeperConfig",
     "ConfigError",
     "ATTRIBUTION_SKILL",
+    "CATEGORIZE_SKILL",
     # orchestrator (§5 spine)
     "StandingRun",
     # skills (§4 computation)
@@ -77,4 +87,8 @@ __all__ = [
     "HstRegime",
     "select_regime",
     "UnknownTaxRegime",
+    "categorize",
+    "CategorizationReport",
+    "CategoryProposal",
+    "CategoryFlag",
 ]
