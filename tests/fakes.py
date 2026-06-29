@@ -8,6 +8,7 @@ to exercise the §5 boundary and record what the orchestrator did.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from bookkeeper.config import BookkeeperConfig
 from bookkeeper.contracts import Notifier, ReviewQueue, RunLog, RunLogEntry
@@ -38,8 +39,8 @@ def make_transaction(
     *,
     attribution_target_id: str = "target-001",
     vendor: str = "Acme Supplies",
-    amount: float = 45.99,
-    tax: float = 3.50,
+    amount: Decimal = Decimal("45.99"),
+    tax: Decimal = Decimal("3.50"),
     date: datetime | None = None,
     description: str = "",
     artifact_bytes: bytes = b"",
@@ -48,8 +49,9 @@ def make_transaction(
 
     `artifact_bytes` defaults to empty, mirroring the `LedgerSource` read-path
     projection (the computation skills total figures; an adapter may omit the
-    source blob on the read path). Pass `tax=...` (incl. negatives for refunds)
-    to drive the regime totals.
+    source blob on the read path). Money is `Decimal` (exact currency, as the
+    model now requires); pass `tax=Decimal(...)` (incl. negatives for refunds, or
+    `Decimal("0")` for the adapter-coalesced absent-tax case) to drive the totals.
     """
     return Transaction(
         attribution_target_id=attribution_target_id,
@@ -115,8 +117,8 @@ class FakeExtractor(Extractor):
             return self.result
         return ExtractedTransaction(
             vendor="Acme Supplies",
-            amount=45.99,
-            tax=3.50,
+            amount=Decimal("45.99"),
+            tax=Decimal("3.50"),
             date=_FIXED_DATE,
             description=f"Artifact: {source_hint}",
         )

@@ -30,11 +30,11 @@ nothing. The seam is built so VAT / US sales tax / etc. can register later
 without touching the skill; v1 builds and validates HST only.
 
 **Decimal money.** All tax arithmetic is `Decimal`, never `float`. The model's
-`amount`/`tax` are `float` today (a latent precision issue flagged for a
-follow-up — not fixed here); this skill converts each value to `Decimal` *at the
-boundary* via `Decimal(str(x))` (string conversion, so 0.10 + 0.20 totals to an
-exact 0.30, not 0.30000000000000004) and totals only in `Decimal`. This matches
-instance #1's HST report, which also totals in `Decimal`.
+`amount`/`tax` are `Decimal` (exact currency), and absent / NULL tax is coalesced
+to `Decimal("0")` by the `LedgerSource` adapter at the boundary — so this skill
+receives exact Decimals and totals them directly (0.10 + 0.20 sums to an exact
+0.30, not 0.30000000000000004), no per-value laundering. This matches instance
+#1's HST report, which also totals in `Decimal`.
 """
 
 from __future__ import annotations
@@ -49,19 +49,6 @@ from bookkeeper.ports import LedgerSource
 
 # Decimal zero, reused so totals start and stay Decimal (never coerced to float).
 _ZERO = Decimal("0")
-
-
-def _to_decimal(value: float | int | None) -> Decimal:
-    """Convert a model money field to `Decimal` at the boundary.
-
-    Goes through `str(...)` so a stored float renders to its decimal literal
-    (e.g. ``3.50`` → ``Decimal("3.5")``), not its binary-float expansion. A
-    `None` (NULL / absent tax) counts as 0 — pre-pipeline history that never
-    captured tax contributes nothing, exactly as the reference's `COALESCE` does.
-    """
-    if value is None:
-        return _ZERO
-    return Decimal(str(value))
 
 
 # --- The tax-regime seam (config-selected) ---------------------------------
@@ -109,8 +96,10 @@ class HstRegime(TaxRegime):
 
     Reclaimable = the full captured `tax` (the business claims it back, so it is a
     pass-through, not a cost — instance #1's "reclaimable pass-through" decision).
-    Absent / NULL tax → 0. Negative tax (a refund or credit, signed negative)
-    reduces the reclaimable total, carrying the same sign as the refunded spend.
+    Absent / NULL tax arrives as `Decimal("0")` (coalesced by the adapter at the
+    boundary) and so contributes 0. Negative tax (a refund or credit, signed
+    negative) reduces the reclaimable total, carrying the same sign as the
+    refunded spend.
 
     Ambiguity (§5.3) for HST is uniform-rule-low: the one genuinely ambiguous case
     is **tax captured on a transaction with no attribution target it can be tied
@@ -122,7 +111,7 @@ class HstRegime(TaxRegime):
     name = "HST"
 
     def classify(self, transaction: Transaction) -> TaxLine:
-        reclaimable = _to_decimal(transaction.tax)
+        reclaimable = transaction.tax  # already an exact Decimal at the model
         if reclaimable != _ZERO and not (transaction.attribution_target_id or "").strip():
             return TaxLine(
                 transaction,
