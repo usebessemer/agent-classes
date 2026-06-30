@@ -29,6 +29,13 @@ Built here:
   broken out, reconciliation, and summary); per §5.4 it writes nothing canonical,
   calls no `PackageWriter`, and **refuses to package an unclosed (BLOCKED) period**.
   A pure function over the close + config; `accountant_format`-agnostic.
+- `flag_anomaly` — surface **mechanical** anomalies in a period for a human
+  (charter `flagAnomaly`, §5.6). Returns an advisory `AnomalyReport` of three flag
+  kinds — duplicates, over-materiality (only when `materiality_floor` is set —
+  inert otherwise), and malformed records; per §5 it is **advisory: writes
+  nothing, mutates nothing, blocks no skill**. Reads via `LedgerSource`.
+  **Mechanical only** — no trend / forecast / pattern / predictive modelling (the
+  §2-excluded analytics layer); it inspects individual records, never trends.
 """
 
 from bookkeeper.skills.categorize import (
@@ -36,6 +43,12 @@ from bookkeeper.skills.categorize import (
     CategoryFlag,
     CategoryProposal,
     categorize,
+)
+from bookkeeper.skills.flag_anomaly import (
+    AnomalyFlag,
+    AnomalyKind,
+    AnomalyReport,
+    flag_anomaly,
 )
 from bookkeeper.skills.close_period import (
     AssembledPeriod,
@@ -107,4 +120,8 @@ __all__ = [
     "PackageStatus",
     "PackageEntry",
     "PackageSummary",
+    "flag_anomaly",
+    "AnomalyReport",
+    "AnomalyFlag",
+    "AnomalyKind",
 ]

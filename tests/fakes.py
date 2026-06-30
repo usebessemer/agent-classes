@@ -107,7 +107,7 @@ def make_config(**overrides) -> BookkeeperConfig:
         books_location="generic-ledger",
         intake_channel="generic-channel",
         confidence_thresholds={"attribution": 0.9},
-        materiality_floor=1000.0,
+        materiality_floor=Decimal("1000.00"),
     )
     base.update(overrides)
     return BookkeeperConfig.from_mapping(base)

@@ -42,6 +42,9 @@ from bookkeeper.ports import (
 )
 from bookkeeper.skills import (
     AccountantPackage,
+    AnomalyFlag,
+    AnomalyKind,
+    AnomalyReport,
     AssembledPeriod,
     CategorizationReport,
     CategoryFlag,
@@ -69,6 +72,7 @@ from bookkeeper.skills import (
     UnknownTaxRegime,
     categorize,
     close_period,
+    flag_anomaly,
     generate_accountant_package,
     reconcile_account,
     select_regime,
@@ -139,4 +143,8 @@ __all__ = [
     "PackageStatus",
     "PackageEntry",
     "PackageSummary",
+    "flag_anomaly",
+    "AnomalyReport",
+    "AnomalyFlag",
+    "AnomalyKind",
 ]
