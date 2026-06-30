@@ -14,6 +14,10 @@ Built here:
   `categorizeTransaction`). Returns a *proposed* `CategorizationReport`; per
   §5.4 it writes nothing canonical. Categories come from
   `config.chart_of_accounts`; never invents one (§5.2).
+- `reconcile_account` — match the captured ledger against the authoritative
+  statement and surface every gap (charter `reconcileAccount`). Returns a
+  detection-only `ReconciliationReport`; per §5.5 it writes nothing canonical and
+  never resolves a mismatch. Reads via `LedgerSource` + `StatementSource`.
 """
 
 from bookkeeper.skills.categorize import (
@@ -21,6 +25,14 @@ from bookkeeper.skills.categorize import (
     CategoryFlag,
     CategoryProposal,
     categorize,
+)
+from bookkeeper.skills.reconcile import (
+    GapKind,
+    MatchedPair,
+    PairToConfirm,
+    ReconciliationGap,
+    ReconciliationReport,
+    reconcile_account,
 )
 from bookkeeper.skills.track_tax import (
     HstRegime,
@@ -48,4 +60,10 @@ __all__ = [
     "CategorizationReport",
     "CategoryProposal",
     "CategoryFlag",
+    "reconcile_account",
+    "ReconciliationReport",
+    "ReconciliationGap",
+    "MatchedPair",
+    "PairToConfirm",
+    "GapKind",
 ]
