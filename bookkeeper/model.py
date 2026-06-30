@@ -84,3 +84,32 @@ class Transaction:
     date: datetime
     description: str
     artifact_bytes: bytes
+
+
+@dataclass(frozen=True)
+class StatementLine:
+    """One line of the authoritative bank / card statement (read-only).
+
+    The counterpart to a ledger `Transaction` on the reconcile path: what the
+    bank or card issuer says happened, against which the captured books are
+    matched (`reconcileAccount`). Carries a stable `statement_ref` so every
+    matched pair and every surfaced gap links back to the exact statement line it
+    came from (charter §1: fully traceable).
+
+    Money is `Decimal` (exact currency, never `float`): reconcile matches amounts
+    by exact Decimal equality, so a difference is a real discrepancy, not a
+    rounding artifact. `description` is the free-text vendor / description the
+    statement shows (a single string — a statement renders one line per charge),
+    used as the fuzzy disambiguator when several candidates share an amount and a
+    date.
+
+    Like the rest of this model, the row is source-agnostic: a bank export, a
+    card feed, or a processor settlement file all reduce to the same shape. The
+    concrete `StatementSource` adapter constructs these from a real feed and
+    lives in the private instance repo; the framework holds only this shape.
+    """
+
+    statement_ref: str
+    date: datetime
+    amount: Decimal
+    description: str

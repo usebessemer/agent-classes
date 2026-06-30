@@ -12,13 +12,19 @@ from decimal import Decimal
 
 from bookkeeper.config import BookkeeperConfig
 from bookkeeper.contracts import Notifier, ReviewQueue, RunLog, RunLogEntry
-from bookkeeper.model import ExtractedTransaction, IntakeItem, Transaction
+from bookkeeper.model import (
+    ExtractedTransaction,
+    IntakeItem,
+    StatementLine,
+    Transaction,
+)
 from bookkeeper.ports import (
     AttributionResolver,
     Extractor,
     IntakeSource,
     LedgerSink,
     LedgerSource,
+    StatementSource,
 )
 
 # A fixed timestamp so tests are deterministic (no wall-clock reads).
@@ -61,6 +67,28 @@ def make_transaction(
         date=date or _FIXED_DATE,
         description=description,
         artifact_bytes=artifact_bytes,
+    )
+
+
+def make_statement_line(
+    *,
+    statement_ref: str = "stmt-001",
+    date: datetime | None = None,
+    amount: Decimal = Decimal("45.99"),
+    description: str = "Acme Supplies",
+) -> StatementLine:
+    """Build an authoritative statement line for reconcile tests.
+
+    Mirrors `make_transaction`'s shape on the statement side: `Decimal` money
+    (exact, as the model requires) and a stable `statement_ref` for traceability.
+    The default `amount`/`description` line up with `make_transaction`'s defaults
+    so a bare statement line and a bare transaction reconcile as a matched pair.
+    """
+    return StatementLine(
+        statement_ref=statement_ref,
+        date=date or _FIXED_DATE,
+        amount=amount,
+        description=description,
     )
 
 
@@ -178,6 +206,23 @@ class FakeLedger(LedgerSource, LedgerSink):
 
     async def store(self, transaction: Transaction) -> None:
         self.store_calls.append(transaction)
+
+
+class FakeStatementSource(StatementSource):
+    """In-memory read-side statement feed: yields the seeded lines for a period.
+
+    The reconcile counterpart to `FakeLedgerSource`. Read-only — the port has no
+    writer (reconcile mutates nothing, §5.5) — and records the periods requested,
+    so a test can prove the skill only ever *read* the statement.
+    """
+
+    def __init__(self, by_period: dict[str, list[StatementLine]] | None = None):
+        self.by_period = {p: list(lines) for p, lines in (by_period or {}).items()}
+        self.fetched: list[str] = []  # periods requested, in order
+
+    async def fetch_statement(self, period: str) -> list[StatementLine]:
+        self.fetched.append(period)
+        return list(self.by_period.get(period, []))
 
 
 class FakeReviewQueue(ReviewQueue):

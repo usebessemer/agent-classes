@@ -12,6 +12,7 @@ private instance repo — never in this framework.
 | `AttributionResolver` | `attributeTransaction` | `attributionTargets` |
 | `LedgerSink`          | (store, write)         | `booksLocation` |
 | `LedgerSource`        | (read)                 | `booksLocation` |
+| `StatementSource`     | `reconcileAccount` (read) | `booksLocation` |
 
 The escalation port `ReviewQueue` (charter `flagException`) is part of the
 Contract B review substrate and lives in `contracts.py`.
@@ -21,7 +22,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from bookkeeper.model import ExtractedTransaction, IntakeItem, Transaction
+from bookkeeper.model import (
+    ExtractedTransaction,
+    IntakeItem,
+    StatementLine,
+    Transaction,
+)
 
 
 class IntakeSource(ABC):
@@ -109,3 +115,27 @@ class LedgerSource(ABC):
     @abstractmethod
     async def fetch_for_period(self, period: str) -> list[Transaction]:
         """Return all stored transactions for `period` (e.g. "2026-Q2")."""
+
+
+class StatementSource(ABC):
+    """Reads the authoritative bank / card statement for a period (read-only).
+
+    The reconcile counterpart to `LedgerSource`: `LedgerSource` reads what the
+    books *captured*, `StatementSource` reads what the bank / card issuer *says
+    happened*, and `reconcile_account` matches the two and surfaces every gap.
+
+    Read-only by design. Reconcile is **detection-only** — it mutates nothing
+    (§5.5) — so there is deliberately no statement *writer* port: the framework
+    never edits the authoritative feed, and resolution of any gap is always a
+    later, human-gated step. An adapter implements only this read method.
+
+    The concrete adapter reads a real statement feed and lives in the private
+    instance repo. Honest scope note: an instance that ingests only individual
+    source artifacts (and has no statement feed yet) has nothing to implement
+    this against — so reconcile's *value* there waits on a feed — but the port,
+    skill, and matcher are fully built and testable now against an in-memory fake.
+    """
+
+    @abstractmethod
+    async def fetch_statement(self, period: str) -> list[StatementLine]:
+        """Return all authoritative statement lines for `period` (e.g. "2026-Q2")."""

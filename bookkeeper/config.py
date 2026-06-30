@@ -33,6 +33,14 @@ ATTRIBUTION_SKILL = "attribution"
 # attention) to live (confident matches pre-filled as proposals) — see §5.
 CATEGORIZE_SKILL = "categorize"
 
+# The ± day window `reconcileAccount` pairs a ledger txn with a statement line
+# within, when the date window is left unconfigured. Statements post on a delay,
+# so an exact-date requirement would manufacture spurious gaps; ±3 days absorbs
+# the usual posting lag. This is a *matching tolerance*, not a §5 autonomy
+# boundary (reconcile mutates nothing), so unset takes this concrete default
+# rather than going inert.
+DEFAULT_RECONCILE_DATE_WINDOW_DAYS = 3
+
 # The §3 fields an instance must declare to be operable. The boundary-governing
 # fields are intentionally absent — unset leaves the boundary inert, not broken.
 _REQUIRED: tuple[str, ...] = (
@@ -85,6 +93,9 @@ class BookkeeperConfig:
     materiality_floor: float | None = None
     owner_policies: Mapping[str, str] = field(default_factory=dict)
     prior_period_state: str | None = None
+    # A matching tolerance, not a boundary field: unset → a concrete default
+    # (`DEFAULT_RECONCILE_DATE_WINDOW_DAYS`), never inert (see the accessor).
+    reconcile_date_window_days: int | None = None
 
     def __post_init__(self) -> None:
         # Freeze collections so the shared config can't be mutated mid-run.
@@ -127,6 +138,7 @@ class BookkeeperConfig:
             materiality_floor=data.get("materiality_floor"),  # type: ignore[arg-type]
             owner_policies=dict(data.get("owner_policies") or {}),  # type: ignore[arg-type]
             prior_period_state=data.get("prior_period_state"),  # type: ignore[arg-type]
+            reconcile_date_window_days=data.get("reconcile_date_window_days"),  # type: ignore[arg-type]
         )
 
     def attribution_threshold(self) -> float | None:
@@ -148,3 +160,16 @@ class BookkeeperConfig:
         is configured.
         """
         return self.confidence_thresholds.get(CATEGORIZE_SKILL)
+
+    def reconcile_date_window(self) -> int:
+        """The ± day window `reconcileAccount` pairs a ledger txn with a statement line.
+
+        Unlike the confidence thresholds, this is a **matching tolerance, not a
+        §5 autonomy boundary** — reconcile is detection-only and mutates nothing,
+        so there is no "go live" to gate. An unset value therefore takes a
+        concrete default (`DEFAULT_RECONCILE_DATE_WINDOW_DAYS`, ±3 days) rather
+        than the inert `None` the boundary fields use. Widening the window only
+        pairs more lines (fewer date-driven gaps); it never suppresses a real gap.
+        """
+        window = self.reconcile_date_window_days
+        return DEFAULT_RECONCILE_DATE_WINDOW_DAYS if window is None else window
