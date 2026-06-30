@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from types import MappingProxyType
 
 # Well-known key in `confidence_thresholds` for the attribute→file boundary.
@@ -86,6 +87,25 @@ def _is_blank(value: object) -> bool:
     return False
 
 
+def _to_decimal(value: object) -> Decimal | None:
+    """Coerce an optional money config value to exact `Decimal` (or `None`).
+
+    `materiality_floor` is compared against `Decimal` transaction amounts in
+    `flagAnomaly` (over-materiality), so it must itself be `Decimal`: a
+    `Decimal`/`float` comparison raises `TypeError`, and a `float` threshold is
+    inexact. Coercion goes through `str()` so a float literal like ``1000.10``
+    becomes the exact ``Decimal("1000.10")`` rather than the float's noisy binary
+    expansion (`Decimal(1000.10)` would be `1000.0999999…`). `None` (unset) passes
+    through unchanged — the §5 inert signal that leaves the over-materiality check
+    skipped until the floor is configured.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
 @dataclass(frozen=True)
 class BookkeeperConfig:
     """Typed, immutable view of the charter §3 per-instance fields.
@@ -106,7 +126,11 @@ class BookkeeperConfig:
 
     # --- Optional: boundary + policy fields (unset → inert / conservative) ---
     confidence_thresholds: Mapping[str, float] = field(default_factory=dict)
-    materiality_floor: float | None = None
+    # `Decimal | None`, not `float`: the over-materiality boundary (`flagAnomaly`,
+    # §5.6) compares it against `Decimal` amounts, so it is coerced to exact
+    # `Decimal` on construction (`_to_decimal`). `None` = unset = inert (the
+    # over-materiality check is skipped until configured).
+    materiality_floor: Decimal | None = None
     owner_policies: Mapping[str, str] = field(default_factory=dict)
     prior_period_state: str | None = None
     # A matching tolerance, not a boundary field: unset → a concrete default
@@ -125,6 +149,10 @@ class BookkeeperConfig:
         object.__setattr__(
             self, "owner_policies", MappingProxyType(dict(self.owner_policies))
         )
+        # Coerce the materiality floor to exact `Decimal` on every construction
+        # path (direct or `from_mapping`), so a `float`/`int`/`str` passed in can
+        # never reach `flagAnomaly`'s `Decimal` amount comparison as a raw `float`.
+        object.__setattr__(self, "materiality_floor", _to_decimal(self.materiality_floor))
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object]) -> "BookkeeperConfig":
@@ -151,7 +179,7 @@ class BookkeeperConfig:
             books_location=str(data["books_location"]),
             intake_channel=str(data["intake_channel"]),
             confidence_thresholds=dict(data.get("confidence_thresholds") or {}),  # type: ignore[arg-type]
-            materiality_floor=data.get("materiality_floor"),  # type: ignore[arg-type]
+            materiality_floor=_to_decimal(data.get("materiality_floor")),
             owner_policies=dict(data.get("owner_policies") or {}),  # type: ignore[arg-type]
             prior_period_state=data.get("prior_period_state"),  # type: ignore[arg-type]
             reconcile_date_window_days=data.get("reconcile_date_window_days"),  # type: ignore[arg-type]
