@@ -32,6 +32,7 @@ from bookkeeper.skills.categorize import CategorizationReport, CategoryProposal
 from bookkeeper.skills.close_period import (
     CHECK_PERIOD_CLOSEABLE,
     CHECK_RECONCILIATION_CLEAN,
+    CloseReport,
     CloseStatus,
     close_period,
 )
@@ -259,6 +260,39 @@ def test_refusal_keys_off_close_readiness_not_report_cleanliness():
     assert package.summary is None
     assert package.unmet_close is not None
     assert CHECK_PERIOD_CLOSEABLE in package.unmet_close
+
+
+def test_blocked_status_refused_even_when_a_proposed_close_is_present():
+    """§5.4: a non-READY status alone refuses — independent of the `proposed_close` check.
+
+    Pins the *readiness* half of the guard on its own. `close_period` only ever
+    emits `proposed_close=None` on a BLOCKED close, so the real-close BLOCKED tests
+    above always trip the `None` half too — they don't lock the `status is not READY`
+    half. Here we hand-build the degenerate/illegal combo a real run never emits — a
+    BLOCKED report that nonetheless *carries* a (non-None) proposed close — and prove
+    the skill still refuses on status alone. A mutant that dropped the readiness
+    check (refusing only when `proposed_close is None`) would assemble a PROPOSED
+    package from the present close here; this kills it (§5: pin every guard half).
+    """
+    ready = _ready_close()[0]
+    assert ready.proposed_close is not None  # the close we will (illegally) re-flag
+
+    illegal = CloseReport(
+        period=ready.period,
+        status=CloseStatus.BLOCKED,  # not READY ...
+        checklist=ready.checklist,
+        blockers=(),
+        proposed_close=ready.proposed_close,  # ... yet a proposed close is present
+    )
+    package = generate_accountant_package(illegal, make_config())
+
+    assert package.status is PackageStatus.BLOCKED  # refused on status alone
+    # And crucially no deliverable was assembled from the present proposed close.
+    assert package.entries == ()
+    assert package.summary is None
+    assert package.tax_breakout is None
+    assert package.reconciliation is None
+    assert package.unmet_close is not None
 
 
 def test_no_published_state_exists():
