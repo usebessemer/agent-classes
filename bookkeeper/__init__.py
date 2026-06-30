@@ -41,6 +41,7 @@ from bookkeeper.ports import (
     StatementSource,
 )
 from bookkeeper.skills import (
+    AccountantPackage,
     AssembledPeriod,
     CategorizationReport,
     CategoryFlag,
@@ -52,6 +53,9 @@ from bookkeeper.skills import (
     GapKind,
     HstRegime,
     MatchedPair,
+    PackageEntry,
+    PackageStatus,
+    PackageSummary,
     PairToConfirm,
     PeriodSummary,
     ProposedClose,
@@ -65,6 +69,7 @@ from bookkeeper.skills import (
     UnknownTaxRegime,
     categorize,
     close_period,
+    generate_accountant_package,
     reconcile_account,
     select_regime,
     track_tax,
@@ -129,4 +134,9 @@ __all__ = [
     "PeriodSummary",
     "AssembledPeriod",
     "ProposedClose",
+    "generate_accountant_package",
+    "AccountantPackage",
+    "PackageStatus",
+    "PackageEntry",
+    "PackageSummary",
 ]

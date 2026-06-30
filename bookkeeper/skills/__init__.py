@@ -23,6 +23,12 @@ Built here:
   `CloseReport` (`READY`/`BLOCKED` + checklist); per §5.7 it writes nothing
   canonical and **never signs** — the human signs. A pure function over the
   reconcile / tax / categorize reports + config + period.
+- `generate_accountant_package` — compose a `READY` close into the Contract A
+  deliverable (charter `generateAccountantPackage`, charter §6). Returns a
+  *proposed* `AccountantPackage` (the costed / categorized / taxed ledger, tax
+  broken out, reconciliation, and summary); per §5.4 it writes nothing canonical,
+  calls no `PackageWriter`, and **refuses to package an unclosed (BLOCKED) period**.
+  A pure function over the close + config; `accountant_format`-agnostic.
 """
 
 from bookkeeper.skills.categorize import (
@@ -40,6 +46,13 @@ from bookkeeper.skills.close_period import (
     PeriodSummary,
     ProposedClose,
     close_period,
+)
+from bookkeeper.skills.generate_package import (
+    AccountantPackage,
+    PackageEntry,
+    PackageStatus,
+    PackageSummary,
+    generate_accountant_package,
 )
 from bookkeeper.skills.reconcile import (
     GapKind,
@@ -89,4 +102,9 @@ __all__ = [
     "PeriodSummary",
     "AssembledPeriod",
     "ProposedClose",
+    "generate_accountant_package",
+    "AccountantPackage",
+    "PackageStatus",
+    "PackageEntry",
+    "PackageSummary",
 ]
