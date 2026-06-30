@@ -33,6 +33,30 @@ ATTRIBUTION_SKILL = "attribution"
 # attention) to live (confident matches pre-filled as proposals) — see §5.
 CATEGORIZE_SKILL = "categorize"
 
+# Well-known key in `confidence_thresholds` for the reconcile silent-accept
+# boundary. Its presence is what flips `reconcileAccount` from inert (every
+# amount+date pair surfaced for confirmation) to live (pairs whose vendor
+# similarity clears the floor are accepted as confident matches) — see §5.5.
+RECONCILE_VENDOR_SKILL = "reconcile_vendor"
+
+# The ± day window `reconcileAccount` pairs a ledger txn with a statement line
+# within, when the date window is left unconfigured. Statements post on a delay,
+# so an exact-date requirement would manufacture spurious gaps; ±3 days absorbs
+# the usual posting lag. This is a *matching tolerance*, not a §5 autonomy
+# boundary (reconcile mutates nothing), so unset takes this concrete default
+# rather than going inert.
+DEFAULT_RECONCILE_DATE_WINDOW_DAYS = 3
+
+# The conservative vendor-similarity floor an instance should set for the
+# reconcile silent-accept boundary (`confidence_thresholds["reconcile_vendor"]`)
+# once it has a live feed. After descriptor normalization a genuine same-vendor
+# pair scores well above this, so it auto-confirms, while a divergent collision
+# scores below and surfaces. A documented recommended value, **not** a silent
+# fallback: an unset boundary stays inert (see `reconcile_vendor_threshold`).
+# Calibrate against real mangled-descriptor data when a feed exists; a sane
+# default suffices for now.
+DEFAULT_RECONCILE_VENDOR_FLOOR = 0.7
+
 # The §3 fields an instance must declare to be operable. The boundary-governing
 # fields are intentionally absent — unset leaves the boundary inert, not broken.
 _REQUIRED: tuple[str, ...] = (
@@ -85,6 +109,9 @@ class BookkeeperConfig:
     materiality_floor: float | None = None
     owner_policies: Mapping[str, str] = field(default_factory=dict)
     prior_period_state: str | None = None
+    # A matching tolerance, not a boundary field: unset → a concrete default
+    # (`DEFAULT_RECONCILE_DATE_WINDOW_DAYS`), never inert (see the accessor).
+    reconcile_date_window_days: int | None = None
 
     def __post_init__(self) -> None:
         # Freeze collections so the shared config can't be mutated mid-run.
@@ -127,6 +154,7 @@ class BookkeeperConfig:
             materiality_floor=data.get("materiality_floor"),  # type: ignore[arg-type]
             owner_policies=dict(data.get("owner_policies") or {}),  # type: ignore[arg-type]
             prior_period_state=data.get("prior_period_state"),  # type: ignore[arg-type]
+            reconcile_date_window_days=data.get("reconcile_date_window_days"),  # type: ignore[arg-type]
         )
 
     def attribution_threshold(self) -> float | None:
@@ -148,3 +176,31 @@ class BookkeeperConfig:
         is configured.
         """
         return self.confidence_thresholds.get(CATEGORIZE_SKILL)
+
+    def reconcile_date_window(self) -> int:
+        """The ± day window `reconcileAccount` pairs a ledger txn with a statement line.
+
+        Unlike the confidence thresholds, this is a **matching tolerance, not a
+        §5 autonomy boundary** — reconcile is detection-only and mutates nothing,
+        so there is no "go live" to gate. An unset value therefore takes a
+        concrete default (`DEFAULT_RECONCILE_DATE_WINDOW_DAYS`, ±3 days) rather
+        than the inert `None` the boundary fields use. Widening the window only
+        pairs more lines (fewer date-driven gaps); it never suppresses a real gap.
+        """
+        window = self.reconcile_date_window_days
+        return DEFAULT_RECONCILE_DATE_WINDOW_DAYS if window is None else window
+
+    def reconcile_vendor_threshold(self) -> float | None:
+        """The reconcile silent-accept vendor floor, or `None` when unset.
+
+        `None` is the §5 *inert* signal for `reconcileAccount` (mirrors
+        `attribution_threshold` / `categorize_threshold`): with no floor set the
+        skill leans toward surfacing — every amount+date pair is routed to
+        `to_confirm` for a human, and **nothing** is silently accepted as a
+        confident match — so no instance auto-confirms a divergent-vendor
+        collision before its boundary is configured. When set, a linked pair whose
+        normalized vendor similarity clears the floor becomes a confident match;
+        below it, the pair is surfaced for confirm/reject. The conservative value
+        to configure is `DEFAULT_RECONCILE_VENDOR_FLOOR`.
+        """
+        return self.confidence_thresholds.get(RECONCILE_VENDOR_SKILL)

@@ -13,6 +13,7 @@ in the private instance repo — never in this package.
 from bookkeeper.config import (
     ATTRIBUTION_SKILL,
     CATEGORIZE_SKILL,
+    RECONCILE_VENDOR_SKILL,
     BookkeeperConfig,
     ConfigError,
 )
@@ -24,7 +25,12 @@ from bookkeeper.contracts import (
     RunLogEntry,
     RunOutcome,
 )
-from bookkeeper.model import ExtractedTransaction, IntakeItem, Transaction
+from bookkeeper.model import (
+    ExtractedTransaction,
+    IntakeItem,
+    StatementLine,
+    Transaction,
+)
 from bookkeeper.orchestrator import StandingRun
 from bookkeeper.ports import (
     AttributionResolver,
@@ -32,12 +38,18 @@ from bookkeeper.ports import (
     IntakeSource,
     LedgerSink,
     LedgerSource,
+    StatementSource,
 )
 from bookkeeper.skills import (
     CategorizationReport,
     CategoryFlag,
     CategoryProposal,
+    GapKind,
     HstRegime,
+    MatchedPair,
+    PairToConfirm,
+    ReconciliationGap,
+    ReconciliationReport,
     TargetTax,
     TaxFlag,
     TaxLine,
@@ -45,6 +57,7 @@ from bookkeeper.skills import (
     TaxSummary,
     UnknownTaxRegime,
     categorize,
+    reconcile_account,
     select_regime,
     track_tax,
 )
@@ -57,12 +70,14 @@ __all__ = [
     "IntakeItem",
     "ExtractedTransaction",
     "Transaction",
+    "StatementLine",
     # skill ports
     "IntakeSource",
     "Extractor",
     "AttributionResolver",
     "LedgerSink",
     "LedgerSource",
+    "StatementSource",
     # contracts A/B
     "PackageWriter",
     "ReviewQueue",
@@ -75,6 +90,7 @@ __all__ = [
     "ConfigError",
     "ATTRIBUTION_SKILL",
     "CATEGORIZE_SKILL",
+    "RECONCILE_VENDOR_SKILL",
     # orchestrator (§5 spine)
     "StandingRun",
     # skills (§4 computation)
@@ -91,4 +107,10 @@ __all__ = [
     "CategorizationReport",
     "CategoryProposal",
     "CategoryFlag",
+    "reconcile_account",
+    "ReconciliationReport",
+    "ReconciliationGap",
+    "MatchedPair",
+    "PairToConfirm",
+    "GapKind",
 ]
