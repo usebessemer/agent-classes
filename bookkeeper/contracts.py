@@ -3,9 +3,12 @@
 A Standing executor has no PR, so its work product and its review substrate are
 defined explicitly as two contracts:
 
-- **Contract A — `PackageWriter`**: the periodic accountant package (the output).
-  Interface and docstring only here; the producing skill (`generateAccountantPackage`)
-  is a later task.
+- **Contract A — `PackageWriter`**: the **write-side** of the periodic accountant
+  package. The general package is *assembled* by the `generateAccountantPackage`
+  skill (proposed, returned, format-agnostic); this port is the instance's gated
+  publish step that renders that assembled package to the instance's
+  `accountantFormat` and writes it out — invoked separately, on human approval,
+  never by the skill (§5.4).
 - **Contract B — the review substrate**: `ReviewQueue` (the exceptions pile),
   `RunLog` (the structured run log), and `Notifier` (the wake signal). These
   replace the PR for an unattended executor and make every run observable.
@@ -19,30 +22,50 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from bookkeeper.model import ExtractedTransaction, IntakeItem
+
+if TYPE_CHECKING:
+    # Type-only: the assembled package is produced by the `generateAccountantPackage`
+    # skill. Imported under TYPE_CHECKING (with `from __future__ import annotations`,
+    # the annotation is a string at runtime) so the framework core keeps no runtime
+    # dependency on the skills layer and no import cycle is created.
+    from bookkeeper.skills.generate_package import AccountantPackage
 
 
 # --- Contract A: the accountant package (output) ---------------------------
 
 
 class PackageWriter(ABC):
-    """Contract A — the periodic accountant package (output, ~quarterly).
+    """Contract A — the **write-side** of the periodic accountant package (~quarterly).
 
-    Produces the deliverable to the instance's §3 `accountantFormat`: a
-    categorized, attribution-costed ledger (every transaction with its
-    source-artifact link, account, and target), applicable tax broken out,
-    reconciled against the authoritative statements, plus a period summary.
-    Per charter §5.4, every computed figure is *proposed* for sign-off, never
+    The gated publish step, **separated from assembly** per §5.4. The general
+    Contract A package — a categorized, attribution-costed ledger (every
+    transaction with its source-artifact link, account, and target), applicable
+    tax broken out, the reconciliation result, plus a period summary — is
+    *assembled* by the `generateAccountantPackage` skill: proposed, returned,
+    `accountantFormat`-agnostic, writing nothing. **This port** takes that
+    assembled package and renders it to the instance's §3 `accountantFormat` (a QBO
+    export, a spreadsheet, …), writing the deliverable out.
+
+    It is the **instance's gated, human-approved publish step** — an adapter in the
+    private instance repo, invoked separately **on human approval, never by the
+    skill** (the skill cannot publish; it has no writer). Per charter §5.4 every
+    computed figure is *proposed* for sign-off until this step runs, never
     auto-published.
 
-    Interface only. The producing skill (`generateAccountantPackage`) is a
-    later task; this fixes the seam so adapters and that skill agree on shape.
+    Interface only — the framework holds the seam; the concrete renderer (the
+    format adapter) lives in the private instance repo.
     """
 
     @abstractmethod
-    async def generate_package(self, period: str) -> None:
-        """Assemble and write the accountant package for `period` (e.g. "2026-Q2")."""
+    async def write_package(self, package: AccountantPackage) -> None:
+        """Render the assembled `package` to the instance's `accountantFormat` and write it.
+
+        The gated publish step (§5.4): called separately on human approval with the
+        package the `generateAccountantPackage` skill assembled — never by that
+        skill. `package.period` identifies the period (e.g. "2026-Q2")."""
 
 
 # --- Contract B: the review substrate (queue + run log + notify) -----------

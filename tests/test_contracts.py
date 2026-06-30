@@ -38,10 +38,20 @@ def test_ports_are_abstract(abc):
         abc()
 
 
-def test_package_writer_is_an_abstract_stub():
-    """Contract A is interface-only: `generate_package` is abstract, unimplemented."""
+def test_package_writer_is_an_abstract_write_side_stub():
+    """Contract A is interface-only: the write-side `write_package(package)` is abstract.
+
+    Refined per Task 6: the write-side takes the *assembled* package (not a bare
+    `period`) — assembly is the `generateAccountantPackage` skill; this port is the
+    gated, instance-side publish step that renders it (§5.4).
+    """
     assert inspect.isabstract(PackageWriter)
-    assert "generate_package" in PackageWriter.__abstractmethods__
+    assert "write_package" in PackageWriter.__abstractmethods__
+    # The old assemble-side stub is gone — assembly moved to the skill.
+    assert not hasattr(PackageWriter, "generate_package")
+    # The write-side takes the assembled package, not a raw period string.
+    params = list(inspect.signature(PackageWriter.write_package).parameters)
+    assert params == ["self", "package"]
 
 
 def test_public_surface_is_importable():
