@@ -37,18 +37,30 @@ a future interaction-surface piece and is deliberately *not* built here.
 Checked over the three reports + the period, in a fixed order:
 
 1. **Period is closeable vs prior state** — the `period` is strictly *after*
-   `config.prior_period_state`'s last close. Periods are treated as opaque,
-   lexicographically-ordered labels (ISO-style, year-first and zero-padded:
-   ``2026-Q1`` < ``2026-Q2``, ``2026-01`` < ``2026-02``); an unset
+   `config.prior_period_state`'s last close. Each label is **parsed** into a
+   comparable ``(year, sub-period)`` key for the formats the class supports —
+   ``YYYY-Qn`` quarterly (``2026-Q2``) and ``YYYY-MM`` monthly (``2026-05``;
+   unpadded ``2026-5`` accepted) — and compared numerically, **never by raw
+   string order**. Raw string order is wrong over free-form labels: it would let
+   ``2026-2`` close after ``2026-12`` (Feb after Dec) or ``2026-Q2`` after
+   ``2026-Q10`` — the exact wrong-direction re-close §5 forbids. An unset
    `prior_period_state` means no period has closed yet, so any period is
-   closeable. A period at or before the prior close is refused (§5: never edit
-   filed prior-period state).
-2. **Reconciliation clean** — no open `gaps` *and* no `to_confirm` in the
+   closeable. A period at or before the prior close is refused; and any label
+   that does not parse to a supported format, or two labels of *different*
+   formats that cannot be ordered against each other, **fail-safe to BLOCK** —
+   the guard refuses rather than guessing the direction (§5: never edit filed
+   prior-period state).
+2. **Reports describe this period** — `reconciliation`, `tax_summary`, and
+   `categorization` each carry the `period` they cover; all three must equal the
+   `period` being closed. Assembling clean reports for one period under another
+   period's close would propose a wrong-period sign-off — fail-safe BLOCK (§5:
+   close the right period's data).
+3. **Reconciliation clean** — no open `gaps` *and* no `to_confirm` in the
    `ReconciliationReport`. Any of either → blocker.
-3. **No un-categorizable lines** — no `flagged` in the `CategorizationReport`
+4. **No un-categorizable lines** — no `flagged` in the `CategorizationReport`
    (the genuinely-unresolved, never-matched ones). Category **proposals do not
    block**: the human signing the close confirms them; only `flagged` lines block.
-4. **Tax clean** — no `flagged` in the `TaxSummary` (e.g. tax captured with no
+5. **Tax clean** — no `flagged` in the `TaxSummary` (e.g. tax captured with no
    target). The summary having been produced means the totals were struck.
 
 All met → `READY`: assemble + return the proposed close. Any unmet → `BLOCKED`:
@@ -63,6 +75,7 @@ deterministic order.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -79,9 +92,18 @@ from bookkeeper.skills.track_tax import TaxFlag, TaxSummary
 # reading the report can see exactly which §5.7 precondition each line is about
 # (charter §1: fully traceable). Plain string tags, fixed order.
 CHECK_PERIOD_CLOSEABLE = "period_closeable"
+CHECK_PERIOD_COHERENT = "period_coherent"
 CHECK_RECONCILIATION_CLEAN = "reconciliation_clean"
 CHECK_CATEGORIZATION_COMPLETE = "categorization_complete"
 CHECK_TAX_CLEAN = "tax_clean"
+
+# The period-label formats the close guard can order. A quarterly label is
+# ``YYYY-Qn`` (n a single quarter 1–4); a monthly label is ``YYYY-MM`` (the month
+# 1–12, padded or not). Anything else does not parse — and an unparseable or
+# mixed-format pair fails safe to BLOCK rather than being compared by raw string
+# order (which mis-orders ``2026-2`` vs ``2026-12`` and ``2026-Q2`` vs ``2026-Q10``).
+_QUARTER_RE = re.compile(r"^(\d{4})-Q([1-4])$")
+_MONTH_RE = re.compile(r"^(\d{4})-(\d{1,2})$")
 
 
 # --- The result model (proposed, traceable) --------------------------------
@@ -215,17 +237,42 @@ class CloseReport:
 # --- The precondition checks (pure, deterministic) --------------------------
 
 
+def _parse_period(label: str) -> tuple[str, int, int] | None:
+    """Parse a period label into a comparable ``(kind, year, sub)`` key, or `None`.
+
+    Supports the two formats the class orders — ``YYYY-Qn`` quarterly →
+    ``("Q", year, quarter)`` and ``YYYY-MM`` monthly → ``("M", year, month)``
+    (the month padded or not, validated 1–12). Returns `None` for anything that
+    does not match a supported format (e.g. ``2026-Q10``, ``2026-13``, free
+    text): `None` is the **fail-safe signal** — the guard refuses an unparseable
+    label rather than comparing it by raw string order. Two keys are only
+    orderable when their `kind` matches; the caller treats a `kind` mismatch
+    (quarterly vs monthly) as not-comparable and fails safe to BLOCK.
+    """
+    text = (label or "").strip()
+    quarter = _QUARTER_RE.match(text)
+    if quarter:
+        return ("Q", int(quarter.group(1)), int(quarter.group(2)))
+    month = _MONTH_RE.match(text)
+    if month and 1 <= int(month.group(2)) <= 12:
+        return ("M", int(month.group(1)), int(month.group(2)))
+    return None
+
+
 def _check_period_closeable(
     period: str, prior_period_state: str | None
 ) -> tuple[CloseCheck, CloseBlocker | None]:
     """Precondition 1 — the period is strictly after the last closed period.
 
     An unset `prior_period_state` means no period has closed yet, so any period is
-    closeable. Otherwise the (stripped) `period` must compare strictly greater
-    than the (stripped) prior close, treating both as opaque, lexicographically-
-    ordered period labels. A period at or before the prior close is refused — the
-    fail-safe direction is BLOCK, so equal labels never re-close (§5: never edit
-    filed prior-period state). Reads `prior_period_state`; never mutates it.
+    closeable. Otherwise both labels are parsed (`_parse_period`) and compared on
+    their numeric ``(year, sub-period)`` key — **never by raw string order**,
+    which mis-orders ``2026-2`` vs ``2026-12`` and ``2026-Q2`` vs ``2026-Q10``.
+    The fail-safe direction is BLOCK: a period at or before the prior close, a
+    label that does not parse to a supported format, or two labels of different
+    formats that cannot be ordered all refuse — the guard never guesses a
+    direction (§5: never edit filed prior-period state). Reads `prior_period_state`;
+    never mutates it.
     """
     prior = (prior_period_state or "").strip()
     if not prior:
@@ -238,7 +285,26 @@ def _check_period_closeable(
             ),
             None,
         )
-    if period.strip() > prior:
+
+    period_key = _parse_period(period)
+    prior_key = _parse_period(prior)
+
+    # Fail-safe: an unparseable label, or two labels of different formats, cannot
+    # be ordered — refuse rather than fall through to a raw string compare (§5).
+    if period_key is None or prior_key is None or period_key[0] != prior_key[0]:
+        reason = (
+            f"Cannot order period {period!r} against the last closed period "
+            f"{prior!r} as comparable period labels (supported: YYYY-Qn "
+            f"quarterly, YYYY-MM monthly, both of the same format) — refusing the "
+            f"close rather than guessing the direction (§5: fail-safe, never edit "
+            f"filed prior-period state)."
+        )
+        return (
+            CloseCheck(CHECK_PERIOD_CLOSEABLE, False, reason),
+            CloseBlocker(CHECK_PERIOD_CLOSEABLE, reason, None),
+        )
+
+    if period_key[1:] > prior_key[1:]:
         return (
             CloseCheck(
                 CHECK_PERIOD_CLOSEABLE,
@@ -256,6 +322,50 @@ def _check_period_closeable(
     return (
         CloseCheck(CHECK_PERIOD_CLOSEABLE, False, reason),
         CloseBlocker(CHECK_PERIOD_CLOSEABLE, reason, None),
+    )
+
+
+def _check_period_coherent(
+    period: str,
+    reconciliation: ReconciliationReport,
+    tax_summary: TaxSummary,
+    categorization: CategorizationReport,
+) -> tuple[CloseCheck, CloseBlocker | None]:
+    """Precondition 2 — all three reports describe the period being closed.
+
+    Each report carries the `period` it covers; all three must equal the `period`
+    argument. A clean set of reports for *another* period would otherwise assemble
+    into a wrong-period sign-off proposal — so any mismatch fails safe to BLOCK,
+    naming which report(s) diverged for the trail (§5: close the right period's
+    data).
+    """
+    mismatched = [
+        (name, report.period)
+        for name, report in (
+            ("reconciliation", reconciliation),
+            ("tax_summary", tax_summary),
+            ("categorization", categorization),
+        )
+        if report.period != period
+    ]
+    if not mismatched:
+        return (
+            CloseCheck(
+                CHECK_PERIOD_COHERENT,
+                True,
+                f"All three reports describe the period being closed ({period!r}).",
+            ),
+            None,
+        )
+    detail = ", ".join(f"{name} covers {covered!r}" for name, covered in mismatched)
+    reason = (
+        f"The reports do not all describe the period being closed ({period!r}): "
+        f"{detail} — refusing to assemble a close over another period's data "
+        f"(§5: fail-safe, close the right period's data)."
+    )
+    return (
+        CloseCheck(CHECK_PERIOD_COHERENT, False, reason),
+        CloseBlocker(CHECK_PERIOD_COHERENT, reason, None),
     )
 
 
@@ -425,7 +535,7 @@ def close_period(
     """Assemble `period` and propose it for sign-off — proposed, never signed (§5.7).
 
     1. Check the period is closeable vs `config.prior_period_state` (else BLOCKED;
-       never touch prior state).
+       never touch prior state) and that the three reports describe this period.
     2. Run the precondition checklist over the three reports — reconciliation
        clean, categorization complete, tax clean.
     3. Any unmet → BLOCKED + every open item as a blocker; a signable close is
@@ -441,14 +551,19 @@ def close_period(
     period_check, period_blocker = _check_period_closeable(
         period, config.prior_period_state
     )
+    coherence_check, coherence_blocker = _check_period_coherent(
+        period, reconciliation, tax_summary, categorization
+    )
     recon_check, recon_blockers = _check_reconciliation_clean(reconciliation)
     cat_check, cat_blockers = _check_categorization_complete(categorization)
     tax_check, tax_blockers = _check_tax_clean(tax_summary)
 
-    checklist = (period_check, recon_check, cat_check, tax_check)
+    checklist = (period_check, coherence_check, recon_check, cat_check, tax_check)
     blockers: list[CloseBlocker] = []
     if period_blocker is not None:
         blockers.append(period_blocker)
+    if coherence_blocker is not None:
+        blockers.append(coherence_blocker)
     blockers.extend(recon_blockers)
     blockers.extend(cat_blockers)
     blockers.extend(tax_blockers)

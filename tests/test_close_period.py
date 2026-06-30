@@ -23,6 +23,8 @@ these tests build the three reports directly (deterministic, no pipeline run).
 import inspect
 from decimal import Decimal
 
+import pytest
+
 import bookkeeper
 from bookkeeper.skills.categorize import (
     CategorizationReport,
@@ -32,6 +34,7 @@ from bookkeeper.skills.categorize import (
 from bookkeeper.skills.close_period import (
     CHECK_CATEGORIZATION_COMPLETE,
     CHECK_PERIOD_CLOSEABLE,
+    CHECK_PERIOD_COHERENT,
     CHECK_RECONCILIATION_CLEAN,
     CHECK_TAX_CLEAN,
     AssembledPeriod,
@@ -187,7 +190,7 @@ def test_clean_period_is_ready_with_assembled_close():
     assert report.period == _PERIOD
     assert report.status is CloseStatus.READY
     assert report.blockers == ()
-    assert len(report.checklist) == 4
+    assert len(report.checklist) == 5
     assert all(c.met for c in report.checklist)
     assert all(c.reason for c in report.checklist)  # every check is §1-traceable
 
@@ -245,10 +248,11 @@ def test_multiple_open_items_all_surface_as_blockers():
     assert report.status is CloseStatus.BLOCKED
     checks_failed = {b.check for b in report.blockers}
     assert checks_failed == {CHECK_RECONCILIATION_CLEAN, CHECK_TAX_CLEAN}
-    # The checklist still carries all four, the two clean ones met.
-    assert len(report.checklist) == 4
+    # The checklist still carries all five, the clean ones met.
+    assert len(report.checklist) == 5
     assert _check(report, CHECK_CATEGORIZATION_COMPLETE).met
     assert _check(report, CHECK_PERIOD_CLOSEABLE).met
+    assert _check(report, CHECK_PERIOD_COHERENT).met
 
 
 # --- category proposals don't block; only `flagged` does ---------------------
@@ -313,6 +317,62 @@ def test_period_before_prior_close_is_refused():
     assert not _check(report, CHECK_PERIOD_CLOSEABLE).met
 
 
+@pytest.mark.parametrize(
+    "period,prior,why",
+    [
+        ("2026-2", "2026-12", "unpadded month: Feb is before Dec"),
+        ("2026-02", "2026-12", "padded month: Feb is before Dec"),
+        ("2026-3", "2026-03", "padding mismatch: same month (equal → block)"),
+        ("2026-Q2", "2026-Q4", "quarter: Q2 is before Q4"),
+        ("2026-Q2", "2026-Q10", "multi-digit quarter label does not parse"),
+        ("2026-Q2", "2026-05", "mixed quarter vs month — not comparable"),
+        ("2026-05", "2026-Q2", "mixed month vs quarter — not comparable"),
+        ("2026-13", "2026-12", "invalid month 13 does not parse"),
+        ("garbage", "2026-Q1", "unparseable period label"),
+        ("2026-Q1", "garbage", "unparseable prior label"),
+    ],
+)
+def test_prior_period_guard_blocks_wrong_direction_or_unparseable(period, prior, why):
+    """AC (critical fix): the re-close direction and unparseable labels BLOCK.
+
+    Raw string order would (wrongly) allow several of these; parse-and-compare
+    with a fail-safe BLOCK on any label that does not parse to a supported format
+    (or two formats that cannot be ordered) refuses every one (§5: never re-close
+    or edit a filed prior period, never guess the direction). `why` documents the
+    case.
+    """
+    config = make_config(prior_period_state=prior)
+    report = _close(config=config, period=period)
+
+    assert report.status is CloseStatus.BLOCKED, why
+    assert report.proposed_close is None, why
+    assert not _check(report, CHECK_PERIOD_CLOSEABLE).met, why
+    blockers = [b for b in report.blockers if b.check == CHECK_PERIOD_CLOSEABLE]
+    assert len(blockers) == 1, why
+
+
+@pytest.mark.parametrize(
+    "period,prior",
+    [
+        ("2026-12", "2026-2"),  # monthly, unpadded prior: Dec after Feb (raw string mis-orders!)
+        ("2026-12", "2026-11"),  # monthly, padded
+        ("2026-Q4", "2026-Q1"),  # quarterly, same year
+        ("2027-Q1", "2026-Q4"),  # quarterly, year rollover
+    ],
+)
+def test_period_strictly_after_prior_is_closeable(period, prior):
+    """The forward direction still passes — parse-and-compare orders numerically.
+
+    `2026-12` after `2026-2` is the case raw string order gets *backwards*
+    (``"2026-12" < "2026-2"``): the parsed comparison closes it correctly.
+    """
+    config = make_config(prior_period_state=prior)
+    report = _close(config=config, period=period)
+
+    assert _check(report, CHECK_PERIOD_CLOSEABLE).met
+    assert report.status is CloseStatus.READY
+
+
 def test_unset_prior_period_state_means_any_period_closeable():
     """No prior close on record (unset) → the period passes the prior-state guard."""
     config = make_config()  # prior_period_state defaults to None
@@ -335,6 +395,44 @@ def test_prior_period_guard_never_mutates_config_or_prior_state():
 
     assert config.prior_period_state == before_prior == "2026-Q2"
     assert dict(config.confidence_thresholds) == before_thresholds
+
+
+# --- report period coherence (close the right period's data) -----------------
+
+
+def test_coherent_reports_pass_the_coherence_check():
+    """All three reports describing the close period → the coherence check is met."""
+    report = _close()
+    assert _check(report, CHECK_PERIOD_COHERENT).met
+
+
+@pytest.mark.parametrize(
+    "recon_period,tax_period,cat_period",
+    [
+        ("2026-Q1", "2026-Q2", "2026-Q2"),  # reconciliation diverges
+        ("2026-Q2", "2026-Q1", "2026-Q2"),  # tax diverges
+        ("2026-Q2", "2026-Q2", "2026-Q1"),  # categorization diverges
+    ],
+)
+def test_reports_for_another_period_block(recon_period, tax_period, cat_period):
+    """MINOR fix: clean reports for another period → BLOCKED, never a wrong-period close.
+
+    Even with every content check clean, a report whose `.period` differs from the
+    period being closed would assemble a wrong-period sign-off proposal — refused.
+    """
+    report = close_period(
+        _clean_recon(recon_period),
+        _clean_tax(tax_period),
+        _clean_cat(cat_period),
+        make_config(),
+        "2026-Q2",
+    )
+
+    assert report.status is CloseStatus.BLOCKED
+    assert report.proposed_close is None
+    assert not _check(report, CHECK_PERIOD_COHERENT).met
+    blockers = [b for b in report.blockers if b.check == CHECK_PERIOD_COHERENT]
+    assert len(blockers) == 1  # one coherence blocker, naming the divergence
 
 
 # --- READY assembles a correct, deterministic period summary -----------------
@@ -380,10 +478,11 @@ def test_blocked_report_still_carries_full_checklist():
     names = [c.name for c in report.checklist]
     assert names == [
         CHECK_PERIOD_CLOSEABLE,
+        CHECK_PERIOD_COHERENT,
         CHECK_RECONCILIATION_CLEAN,
         CHECK_CATEGORIZATION_COMPLETE,
         CHECK_TAX_CLEAN,
-    ]  # deterministic order, all four present
+    ]  # deterministic order, all five present
 
 
 # --- §5.7: proposes, never signs; writes nothing canonical -------------------
