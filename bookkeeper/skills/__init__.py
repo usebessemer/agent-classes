@@ -18,6 +18,11 @@ Built here:
   statement and surface every gap (charter `reconcileAccount`). Returns a
   detection-only `ReconciliationReport`; per §5.5 it writes nothing canonical and
   never resolves a mismatch. Reads via `LedgerSource` + `StatementSource`.
+- `close_period` — assemble the period's reports and either propose the close for
+  sign-off or block with the open items (charter `closePeriod`). Returns a
+  `CloseReport` (`READY`/`BLOCKED` + checklist); per §5.7 it writes nothing
+  canonical and **never signs** — the human signs. A pure function over the
+  reconcile / tax / categorize reports + config + period.
 """
 
 from bookkeeper.skills.categorize import (
@@ -25,6 +30,16 @@ from bookkeeper.skills.categorize import (
     CategoryFlag,
     CategoryProposal,
     categorize,
+)
+from bookkeeper.skills.close_period import (
+    AssembledPeriod,
+    CloseBlocker,
+    CloseCheck,
+    CloseReport,
+    CloseStatus,
+    PeriodSummary,
+    ProposedClose,
+    close_period,
 )
 from bookkeeper.skills.reconcile import (
     GapKind,
@@ -66,4 +81,12 @@ __all__ = [
     "MatchedPair",
     "PairToConfirm",
     "GapKind",
+    "close_period",
+    "CloseReport",
+    "CloseStatus",
+    "CloseCheck",
+    "CloseBlocker",
+    "PeriodSummary",
+    "AssembledPeriod",
+    "ProposedClose",
 ]
