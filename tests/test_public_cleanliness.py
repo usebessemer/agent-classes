@@ -52,7 +52,9 @@ _GUARD_FILE = Path(__file__).resolve()
 # package and the test suite. Suffixes kept narrow (source + docs + config) so a
 # stray binary/cache file is never read.
 _ROOT_DOCS = ("README.md", "bookkeeper.md", "class-template.md", "pyproject.toml")
-_SCAN_PACKAGES = ("bookkeeper", "tests")
+# `examples/` is public too (the README quickstart runs it), so it is scanned
+# alongside the package and the test suite.
+_SCAN_PACKAGES = ("bookkeeper", "tests", "examples")
 _SCAN_SUFFIXES = (".py", ".md", ".toml")
 
 # Tokens that must never appear in the public framework. Case-insensitive
@@ -141,7 +143,12 @@ def test_there_are_sources_to_scan():
     # both the package and the widened root (docs + tests), or it proves nothing.
     scanned = {_relpath(p) for p in _scan_paths()}
     assert scanned, "no sources found to scan"
-    for expected in ("bookkeeper.md", "pyproject.toml", "bookkeeper/orchestrator.py"):
+    for expected in (
+        "bookkeeper.md",
+        "pyproject.toml",
+        "bookkeeper/orchestrator.py",
+        "examples/quickstart.py",
+    ):
         assert expected in scanned, f"widened scan is missing {expected}"
     assert any(p.startswith("tests/") for p in scanned), "widened scan is missing tests/"
 
