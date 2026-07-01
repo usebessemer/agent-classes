@@ -33,8 +33,14 @@ from bookkeeper.model import (
 class IntakeSource(ABC):
     """Pulls transactions/artifacts from the intake channel (§3 `intakeChannel`).
 
-    Capture is idempotent: an item marked processed is never fetched again, so
-    the pipeline never double-files.
+    Capture is idempotent: an item **successfully** marked processed is never
+    fetched again. This is the *first* line of the no-double-file guarantee, not
+    the only one. On the auto-file path the orchestrator stores a transaction and
+    *then* marks the item processed as a separate step; if `mark_processed` fails
+    after the store succeeded, the item is not marked and **will** be re-fetched
+    next run. The guarantee then rests on the *second* line — an idempotent
+    `LedgerSink.store`, whose re-store is a no-op. So: mark-processed prevents the
+    re-fetch; idempotent store prevents a duplicate if the re-fetch happens anyway.
     """
 
     @abstractmethod
@@ -83,11 +89,30 @@ class AttributionResolver(ABC):
 
 
 class LedgerSink(ABC):
-    """Persists an attributed transaction to the canonical ledger (§3 `booksLocation`)."""
+    """Persists an attributed transaction to the canonical ledger (§3 `booksLocation`).
+
+    `store` MUST be **idempotent on a stable key**: re-storing a transaction that
+    is already filed is a no-op, never a duplicate row. This is the *second* line
+    of the no-double-file guarantee (`IntakeSource` is the first). The orchestrator
+    files, then marks the item processed as a separate step; if the mark fails
+    after a successful store, the item is re-fetched and re-stored next run — an
+    idempotent store makes that re-store harmless.
+
+    The "stable key" is the adapter's choice, derived deterministically from what
+    it persists so the *same* source artifact always maps to the *same* key: a
+    real adapter dedupes on the source-item linkage it stores (the intake id the
+    transaction came from) or, absent that, on the transaction's natural business
+    key. A reference/fake store honors the same contract.
+    """
 
     @abstractmethod
     async def store(self, transaction: Transaction) -> None:
-        """Persist an attributed transaction."""
+        """Persist an attributed transaction.
+
+        Idempotent on a stable key: a re-store of an already-filed transaction is
+        a no-op, never a duplicate (see the class docstring for why the pipeline
+        relies on this).
+        """
 
 
 class LedgerSource(ABC):

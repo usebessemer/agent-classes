@@ -7,6 +7,8 @@ Each test pins one bullet of the §5 contract:
 - unmatched (resolver None) → review + mark processed, never stored
 - any exception → review (with partial) + mark processed, never dropped
 - store failure → review + mark processed, never dropped or double-filed
+- store ok but mark fails → filed once, NOT also in review, run does not raise
+- re-fetch after a mark failure → idempotent store, no duplicate on the 2nd run
 - idempotent: a processed item is never fetched again
 - inert until configured: an unset attribution threshold routes to review
 - Contract B: run log + wake notification are driven correctly
@@ -38,9 +40,10 @@ def _build(
     config=None,
     run_log=None,
     notifier=None,
+    mark_error=None,
 ):
     """Wire a StandingRun from fakes, returning (run, intake, sink, review)."""
-    intake = FakeIntakeSource(items=items)
+    intake = FakeIntakeSource(items=items, mark_error=mark_error)
     sink = sink or FakeLedgerSink()
     review = FakeReviewQueue()
     run = StandingRun(
@@ -139,6 +142,54 @@ async def test_storage_failure_routes_to_review_never_drops():
     assert "Storage failed" in reason
     assert partial is not None
     assert "store-fail-001" in intake.processed_ids
+
+
+async def test_mark_failure_after_store_files_once_not_double_disposed():
+    """Store succeeds, mark_processed fails → filed exactly once, NOT in review.
+
+    The atomicity window (#6): store and mark are separate steps. A mark failure
+    *after* a successful store is an idempotent-retry concern, not a §5
+    disposition — the item is already filed, so it must not also be routed to
+    review (double-disposed) and the run must not raise.
+    """
+    run, intake, sink, review = _build(
+        items=[make_item(intake_id="mark-fail-001")],
+        mark_error=RuntimeError("intake channel unavailable"),
+    )
+    await run.run()  # must not raise, even though mark_processed failed
+
+    # Filed exactly once...
+    assert len(sink.stored) == 1
+    assert sink.stored[0].attribution_target_id == "target-001"
+    # ...and NOT also sitting in the review pile (no double-dispose).
+    assert review.items == []
+    # The mark failed, so the item was never recorded processed.
+    assert "mark-fail-001" not in intake.processed_ids
+
+
+async def test_second_run_after_mark_failure_does_not_duplicate():
+    """The no-double-file guarantee rests on an idempotent store.
+
+    With mark_processed permanently failing, the item is never marked and so is
+    re-fetched every run. An idempotent `LedgerSink.store` makes the re-store a
+    no-op, so two runs still leave the item filed exactly once — no duplicate.
+    """
+    idempotent_sink = FakeLedgerSink(idempotent=True)
+    run, intake, sink, review = _build(
+        items=[make_item(intake_id="refetch-001")],
+        sink=idempotent_sink,
+        mark_error=RuntimeError("intake channel unavailable"),
+    )
+
+    await run.run()
+    # Item was not marked, so it is still pending and will be re-fetched.
+    assert "refetch-001" not in intake.processed_ids
+    assert await intake.fetch_items() != []
+
+    await run.run()  # second pass re-fetches and re-stores the same transaction
+
+    assert len(sink.stored) == 1  # idempotent store → no duplicate filing
+    assert review.items == []  # still never double-disposed to review
 
 
 async def test_idempotent_across_runs():
