@@ -191,6 +191,13 @@ class BookkeeperConfig:
         `None` is the §5 *inert* signal: the orchestrator routes every item to
         review instead of auto-filing, so no instance goes live silently
         auto-filing before its boundary is configured.
+
+        **Presence-gated only in v1.** The orchestrator gates on this value's
+        *presence* (set → live, unset → inert), not its magnitude — the numeric
+        cut-off is not yet compared against a confidence score here. That cut-off
+        lives in the adapter's resolver (which returns match / no-match) until a
+        confidence-scoring resolver lands in the framework; only then does the
+        number itself become the live comparison.
         """
         return self.confidence_thresholds.get(ATTRIBUTION_SKILL)
 

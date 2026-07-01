@@ -98,11 +98,24 @@ class LedgerSink(ABC):
     after a successful store, the item is re-fetched and re-stored next run — an
     idempotent store makes that re-store harmless.
 
-    The "stable key" is the adapter's choice, derived deterministically from what
-    it persists so the *same* source artifact always maps to the *same* key: a
-    real adapter dedupes on the source-item linkage it stores (the intake id the
-    transaction came from) or, absent that, on the transaction's natural business
-    key. A reference/fake store honors the same contract.
+    Choosing the "stable key" — the recommended key, and a sharp edge to avoid.
+    The key is derived deterministically from what the adapter persists, so the
+    *same* source artifact always maps to the *same* key.
+
+    **Recommended: the source-item linkage — the intake/source id the transaction
+    was ingested from**, which the adapter persists alongside the row. There is
+    exactly one such id per real filing, so a re-fetch after a mark failure
+    re-stores under the same key and cleanly no-ops. Prefer it whenever the
+    intake channel gives a stable id.
+
+    **Sharp edge — do not dedupe on the natural business key alone.** A pure
+    natural-key match (vendor + amount + date) silently collapses two
+    genuinely-distinct-but-identical filings — e.g. the *same* $5 coffee bought
+    twice on the same day — into one key: the second `store` no-ops and a real
+    filing is **lost**, with no error to signal it. Fall back to the natural key
+    only when no source-item linkage exists, and treat that as a known
+    under-counting risk, not an equivalent choice. A reference/fake store honors
+    the same contract.
     """
 
     @abstractmethod

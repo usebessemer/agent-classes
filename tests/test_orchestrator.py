@@ -151,10 +151,16 @@ async def test_mark_failure_after_store_files_once_not_double_disposed():
     *after* a successful store is an idempotent-retry concern, not a §5
     disposition — the item is already filed, so it must not also be routed to
     review (double-disposed) and the run must not raise.
+
+    The run log locks the same guarantee in the *record*, not just the trace:
+    exactly one AUTO_FILED entry for the item and no ROUTED_TO_REVIEW, so a mark
+    failure can never read as a double disposition in Contract B either.
     """
+    run_log = FakeRunLog()
     run, intake, sink, review = _build(
         items=[make_item(intake_id="mark-fail-001")],
         mark_error=RuntimeError("intake channel unavailable"),
+        run_log=run_log,
     )
     await run.run()  # must not raise, even though mark_processed failed
 
@@ -165,6 +171,16 @@ async def test_mark_failure_after_store_files_once_not_double_disposed():
     assert review.items == []
     # The mark failed, so the item was never recorded processed.
     assert "mark-fail-001" not in intake.processed_ids
+
+    # Contract B: the disposition is logged as filed-once, never routed —
+    # locking "filed once, never routed" in the record, not just the trace.
+    filed_entries = [e for e in run_log.entries if e.intake_id == "mark-fail-001"]
+    assert len(filed_entries) == 1
+    assert filed_entries[0].outcome is RunOutcome.AUTO_FILED
+    assert filed_entries[0].attribution_target_id == "target-001"
+    assert not any(
+        e.outcome is RunOutcome.ROUTED_TO_REVIEW for e in run_log.entries
+    )
 
 
 async def test_second_run_after_mark_failure_does_not_duplicate():

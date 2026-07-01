@@ -406,7 +406,7 @@ def test_package_is_accountant_format_agnostic():
 @pytest.mark.parametrize("name", ["generate_package.py"])
 def test_new_module_is_under_the_cleanliness_scan(name):
     """AC: the public-cleanliness gate covers the new module (it globs the package)."""
-    from tests.test_public_cleanliness import _package_sources
+    from tests.test_public_cleanliness import _scan_paths
 
-    scanned = {p.name for p in _package_sources()}
+    scanned = {p.name for p in _scan_paths()}
     assert name in scanned, f"{name} must be scanned by the public-cleanliness gate"
