@@ -1,0 +1,287 @@
+"""In-memory port fakes for testing the framework core.
+
+These are test doubles only — **no real adapter** (no inbox, model, registry,
+or ledger client) lives in the framework. They implement the ports just enough
+to exercise the §5 boundary and record what the orchestrator did.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from bookkeeper.config import BookkeeperConfig
+from bookkeeper.contracts import Notifier, ReviewQueue, RunLog, RunLogEntry
+from bookkeeper.model import (
+    ExtractedTransaction,
+    IntakeItem,
+    StatementLine,
+    Transaction,
+)
+from bookkeeper.ports import (
+    AttributionResolver,
+    Extractor,
+    IntakeSource,
+    LedgerSink,
+    LedgerSource,
+    StatementSource,
+)
+
+# A fixed timestamp so tests are deterministic (no wall-clock reads).
+_FIXED_DATE = datetime(2026, 5, 15, 10, 0, 0, tzinfo=timezone.utc)
+
+
+def make_item(intake_id: str = "item-001", source_hint: str = "Acme Supplies, May 15") -> IntakeItem:
+    """Build a generic intake item for tests."""
+    return IntakeItem(
+        intake_id=intake_id,
+        artifact_bytes=b"fake artifact bytes",
+        source_hint=source_hint,
+        received_at=_FIXED_DATE,
+    )
+
+
+def make_transaction(
+    *,
+    attribution_target_id: str = "target-001",
+    vendor: str = "Acme Supplies",
+    amount: Decimal = Decimal("45.99"),
+    tax: Decimal = Decimal("3.50"),
+    date: datetime | None = None,
+    description: str = "",
+    artifact_bytes: bytes = b"",
+) -> Transaction:
+    """Build a stored transaction for read-side / totalling tests.
+
+    `artifact_bytes` defaults to empty, mirroring the `LedgerSource` read-path
+    projection (the computation skills total figures; an adapter may omit the
+    source blob on the read path). Money is `Decimal` (exact currency, as the
+    model now requires); pass `tax=Decimal(...)` (incl. negatives for refunds, or
+    `Decimal("0")` for the adapter-coalesced absent-tax case) to drive the totals.
+    """
+    return Transaction(
+        attribution_target_id=attribution_target_id,
+        vendor=vendor,
+        amount=amount,
+        tax=tax,
+        date=date or _FIXED_DATE,
+        description=description,
+        artifact_bytes=artifact_bytes,
+    )
+
+
+def make_statement_line(
+    *,
+    statement_ref: str = "stmt-001",
+    date: datetime | None = None,
+    amount: Decimal = Decimal("45.99"),
+    description: str = "Acme Supplies",
+) -> StatementLine:
+    """Build an authoritative statement line for reconcile tests.
+
+    Mirrors `make_transaction`'s shape on the statement side: `Decimal` money
+    (exact, as the model requires) and a stable `statement_ref` for traceability.
+    The default `amount`/`description` line up with `make_transaction`'s defaults
+    so a bare statement line and a bare transaction reconcile as a matched pair.
+    """
+    return StatementLine(
+        statement_ref=statement_ref,
+        date=date or _FIXED_DATE,
+        amount=amount,
+        description=description,
+    )
+
+
+def make_config(**overrides) -> BookkeeperConfig:
+    """A fully-configured (boundary live) test config; override any §3 field.
+
+    Pass ``confidence_thresholds={}`` to get an inert (unconfigured) boundary.
+    """
+    base = dict(
+        chart_of_accounts=("5000-supplies",),
+        accounting_method="cash",
+        jurisdiction="XX",
+        tax_regime="standard",
+        accountant_format="generic-export",
+        attribution_targets=("target-001",),
+        books_location="generic-ledger",
+        intake_channel="generic-channel",
+        confidence_thresholds={"attribution": 0.9},
+        materiality_floor=Decimal("1000.00"),
+    )
+    base.update(overrides)
+    return BookkeeperConfig.from_mapping(base)
+
+
+class FakeIntakeSource(IntakeSource):
+    """In-memory intake: yields items not yet marked processed.
+
+    Pass ``mark_error`` to make `mark_processed` raise — modelling the atomicity
+    window where a store succeeds but the mark then fails. The id is never added
+    to ``processed_ids``, so (as with a real channel) the item is re-fetched on
+    the next run; the no-double-file guarantee must then rest on an idempotent
+    `LedgerSink.store` (see `FakeLedgerSink(idempotent=True)`).
+    """
+
+    def __init__(
+        self,
+        items: list[IntakeItem] | None = None,
+        mark_error: Exception | None = None,
+    ):
+        self.items = list(items) if items is not None else [make_item()]
+        self.mark_error = mark_error
+        self.processed_ids: set[str] = set()
+
+    async def fetch_items(self) -> list[IntakeItem]:
+        return [i for i in self.items if i.intake_id not in self.processed_ids]
+
+    async def mark_processed(self, intake_id: str) -> None:
+        if self.mark_error is not None:
+            raise self.mark_error
+        self.processed_ids.add(intake_id)
+
+
+class FakeExtractor(Extractor):
+    """In-memory extraction: returns a fixed result, or raises a configured error."""
+
+    def __init__(
+        self,
+        result: ExtractedTransaction | None = None,
+        error: Exception | None = None,
+    ):
+        self.error = error
+        self.result = result
+
+    async def extract(self, artifact_bytes: bytes, source_hint: str) -> ExtractedTransaction:
+        if self.error is not None:
+            raise self.error
+        if self.result is not None:
+            return self.result
+        return ExtractedTransaction(
+            vendor="Acme Supplies",
+            amount=Decimal("45.99"),
+            tax=Decimal("3.50"),
+            date=_FIXED_DATE,
+            description=f"Artifact: {source_hint}",
+        )
+
+
+class FakeAttributionResolver(AttributionResolver):
+    """In-memory resolver: returns a fixed target id (or None for unmatched)."""
+
+    def __init__(self, target_id: str | None = "target-001"):
+        self.target_id = target_id
+
+    async def resolve(self, transaction: ExtractedTransaction, source_hint: str) -> str | None:
+        return self.target_id
+
+
+class FakeLedgerSink(LedgerSink):
+    """In-memory ledger: records stored transactions, or raises on store.
+
+    By default records every `store` call (append-all), which the boundary tests
+    use to count filings. Pass ``idempotent=True`` to honor the real-adapter
+    contract that `store` is idempotent on a stable key (`LedgerSink.store`):
+    re-storing an already-filed transaction is a no-op, so a re-fetch after a
+    `mark_processed` failure does not duplicate the filing. The stable key here
+    is the frozen `Transaction`'s own value — re-processing the same artifact
+    yields an equal transaction, standing in for the natural key a real adapter
+    would dedupe on.
+    """
+
+    def __init__(self, error: Exception | None = None, idempotent: bool = False):
+        self.error = error
+        self.idempotent = idempotent
+        self.stored: list[Transaction] = []
+
+    async def store(self, transaction: Transaction) -> None:
+        if self.error is not None:
+            raise self.error
+        if self.idempotent and transaction in self.stored:
+            return  # already filed — idempotent no-op on the stable key
+        self.stored.append(transaction)
+
+
+class FakeLedgerSource(LedgerSource):
+    """In-memory read-side ledger: yields the seeded transactions for a period."""
+
+    def __init__(self, by_period: dict[str, list[Transaction]] | None = None):
+        self.by_period = {p: list(txns) for p, txns in (by_period or {}).items()}
+        self.fetched: list[str] = []  # periods requested, in order
+
+    async def fetch_for_period(self, period: str) -> list[Transaction]:
+        self.fetched.append(period)
+        return list(self.by_period.get(period, []))
+
+
+class FakeLedger(LedgerSource, LedgerSink):
+    """Combined read+write fake — one store an adapter implements both ports against.
+
+    Mirrors the real shape (the instance adapter implements `LedgerSink` and
+    `LedgerSource` against the same store), so a test can prove a read-side skill
+    like `track_tax` writes nothing canonical: `store_calls` stays empty.
+    """
+
+    def __init__(self, by_period: dict[str, list[Transaction]] | None = None):
+        self.by_period = {p: list(txns) for p, txns in (by_period or {}).items()}
+        self.fetched: list[str] = []
+        self.store_calls: list[Transaction] = []  # any write the skill must NOT make
+
+    async def fetch_for_period(self, period: str) -> list[Transaction]:
+        self.fetched.append(period)
+        return list(self.by_period.get(period, []))
+
+    async def store(self, transaction: Transaction) -> None:
+        self.store_calls.append(transaction)
+
+
+class FakeStatementSource(StatementSource):
+    """In-memory read-side statement feed: yields the seeded lines for a period.
+
+    The reconcile counterpart to `FakeLedgerSource`. Read-only — the port has no
+    writer (reconcile mutates nothing, §5.5) — and records the periods requested,
+    so a test can prove the skill only ever *read* the statement.
+    """
+
+    def __init__(self, by_period: dict[str, list[StatementLine]] | None = None):
+        self.by_period = {p: list(lines) for p, lines in (by_period or {}).items()}
+        self.fetched: list[str] = []  # periods requested, in order
+
+    async def fetch_statement(self, period: str) -> list[StatementLine]:
+        self.fetched.append(period)
+        return list(self.by_period.get(period, []))
+
+
+class FakeReviewQueue(ReviewQueue):
+    """In-memory exceptions pile: records (item, reason, partial) tuples."""
+
+    def __init__(self):
+        self.items: list[tuple[IntakeItem, str, ExtractedTransaction | None]] = []
+
+    async def submit(
+        self,
+        item: IntakeItem,
+        reason: str,
+        partial: ExtractedTransaction | None = None,
+    ) -> None:
+        self.items.append((item, reason, partial))
+
+
+class FakeRunLog(RunLog):
+    """In-memory run log: records every entry."""
+
+    def __init__(self):
+        self.entries: list[RunLogEntry] = []
+
+    async def record(self, entry: RunLogEntry) -> None:
+        self.entries.append(entry)
+
+
+class FakeNotifier(Notifier):
+    """In-memory wake signal: records every notification summary."""
+
+    def __init__(self):
+        self.notifications: list[str] = []
+
+    async def notify(self, summary: str) -> None:
+        self.notifications.append(summary)
