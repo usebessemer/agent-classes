@@ -114,16 +114,30 @@ def make_config(**overrides) -> BookkeeperConfig:
 
 
 class FakeIntakeSource(IntakeSource):
-    """In-memory intake: yields items not yet marked processed."""
+    """In-memory intake: yields items not yet marked processed.
 
-    def __init__(self, items: list[IntakeItem] | None = None):
+    Pass ``mark_error`` to make `mark_processed` raise — modelling the atomicity
+    window where a store succeeds but the mark then fails. The id is never added
+    to ``processed_ids``, so (as with a real channel) the item is re-fetched on
+    the next run; the no-double-file guarantee must then rest on an idempotent
+    `LedgerSink.store` (see `FakeLedgerSink(idempotent=True)`).
+    """
+
+    def __init__(
+        self,
+        items: list[IntakeItem] | None = None,
+        mark_error: Exception | None = None,
+    ):
         self.items = list(items) if items is not None else [make_item()]
+        self.mark_error = mark_error
         self.processed_ids: set[str] = set()
 
     async def fetch_items(self) -> list[IntakeItem]:
         return [i for i in self.items if i.intake_id not in self.processed_ids]
 
     async def mark_processed(self, intake_id: str) -> None:
+        if self.mark_error is not None:
+            raise self.mark_error
         self.processed_ids.add(intake_id)
 
 
@@ -163,15 +177,28 @@ class FakeAttributionResolver(AttributionResolver):
 
 
 class FakeLedgerSink(LedgerSink):
-    """In-memory ledger: records stored transactions, or raises on store."""
+    """In-memory ledger: records stored transactions, or raises on store.
 
-    def __init__(self, error: Exception | None = None):
+    By default records every `store` call (append-all), which the boundary tests
+    use to count filings. Pass ``idempotent=True`` to honor the real-adapter
+    contract that `store` is idempotent on a stable key (`LedgerSink.store`):
+    re-storing an already-filed transaction is a no-op, so a re-fetch after a
+    `mark_processed` failure does not duplicate the filing. The stable key here
+    is the frozen `Transaction`'s own value — re-processing the same artifact
+    yields an equal transaction, standing in for the natural key a real adapter
+    would dedupe on.
+    """
+
+    def __init__(self, error: Exception | None = None, idempotent: bool = False):
         self.error = error
+        self.idempotent = idempotent
         self.stored: list[Transaction] = []
 
     async def store(self, transaction: Transaction) -> None:
         if self.error is not None:
             raise self.error
+        if self.idempotent and transaction in self.stored:
+            return  # already filed — idempotent no-op on the stable key
         self.stored.append(transaction)
 
 

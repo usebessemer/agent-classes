@@ -11,7 +11,13 @@ The §5 contract, preserved exactly:
 2. **Unmatched (resolver returns `None`) → review + mark-processed.** Never guess.
 3. **Any exception → review (with the partial) + mark-processed.** Never drop,
    never re-loop.
-4. **Idempotent.** Every path marks the item processed; never double-file.
+4. **Idempotent, and never double-file — even if the mark itself fails.** Store
+   and mark-processed are *separate* steps on the auto-file path. A store
+   failure routes to review (never drop). A mark failure *after* a successful
+   store is logged and left to stand as filed — never re-routed (that would
+   double-dispose a filed item), never raised. The item is then re-fetched next
+   run, but an idempotent `LedgerSink.store` makes the re-store a no-op, so the
+   filing is never duplicated (see `IntakeSource` / `LedgerSink.store`).
 
 Plus the safety floor — **inert until configured**: if the attribution boundary
 is not configured (`config.attribution_threshold()` is `None`), even a confident
@@ -108,21 +114,41 @@ class StandingRun:
             )
 
         # The one auto-file path: confident match against an existing target,
-        # boundary configured. Store failures still route to review (never drop).
+        # boundary configured. Store and mark-processed are two *separately*
+        # guarded steps — they must not share a `try`, or a mark failure after a
+        # successful store would double-dispose an already-filed item to review.
+        #
+        # Step 1 — store. A store failure still routes to review (never drop).
+        transaction = Transaction(
+            attribution_target_id=target_id,
+            vendor=partial.vendor,
+            amount=partial.amount,
+            tax=partial.tax,
+            date=partial.date,
+            description=partial.description,
+            artifact_bytes=item.artifact_bytes,
+        )
         try:
-            transaction = Transaction(
-                attribution_target_id=target_id,
-                vendor=partial.vendor,
-                amount=partial.amount,
-                tax=partial.tax,
-                date=partial.date,
-                description=partial.description,
-                artifact_bytes=item.artifact_bytes,
-            )
             await self.sink.store(transaction)
-            await self.intake.mark_processed(item.intake_id)
         except Exception as e:  # noqa: BLE001 — a store failure must not drop the item
             return await self._route_to_review(item, f"Storage failed: {e}", partial)
+
+        # Step 2 — mark processed. The item is now *filed*. A mark failure here
+        # is an idempotent-retry concern, NOT a §5 disposition: do not route the
+        # filed item to review (that would double-dispose it) and do not raise —
+        # log it and let it stand as filed. It will be re-fetched next run (its
+        # "marked → never fetched again" guarantee is broken), but an idempotent
+        # `LedgerSink.store` makes that re-store a no-op, so it is never
+        # duplicated. See `IntakeSource` / `LedgerSink.store` docstrings.
+        try:
+            await self.intake.mark_processed(item.intake_id)
+        except Exception as e:  # noqa: BLE001 — filed already; mark is best-effort retry
+            logger.warning(
+                "Filed %s but mark_processed failed: %s — item stands as filed; "
+                "will be re-fetched next run, idempotent store prevents a duplicate",
+                item.intake_id,
+                e,
+            )
 
         logger.info("Auto-filed %s to target %s", item.intake_id, target_id)
         await self._record(
