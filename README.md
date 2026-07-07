@@ -8,7 +8,8 @@ Each class is anchored by a **charter** — a durable specification a deployment
 
 | Class | Position × Lifecycle | Vertical | Status |
 |---|---|---|---|
-| [Bookkeeper](bookkeeper.md) | Executor × Standing | vertical-agnostic (any small business) | charter v0.1 · framework in build |
+| [Bookkeeper](bookkeeper.md) | Executor × Standing | vertical-agnostic (any small business) | charter v0.1 · framework **v0.1.0 shipped** |
+| [DevLead](devlead.md) | Lead × Standing | cross-vertical (the management character) | charter v0.1 |
 | Legal Admin | Executor × Standing | small law firms | planned |
 
 The library carries both kinds: **vertical-agnostic** classes (the Bookkeeper's books-and-tax shape fits any small business) and **vertical-specific** ones (a Legal Admin's obligations are particular to legal practice).
