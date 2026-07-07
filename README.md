@@ -8,7 +8,8 @@ Each class is anchored by a **charter** — a durable specification a deployment
 
 | Class | Position × Lifecycle | Vertical | Status |
 |---|---|---|---|
-| [Bookkeeper](bookkeeper.md) | Executor × Standing | vertical-agnostic (any small business) | charter v0.1 · framework in build |
+| [Bookkeeper](bookkeeper.md) | Executor × Standing | vertical-agnostic (any small business) | charter v0.1 · framework **v0.2.0 shipped** (typed, PEP 561) |
+| [DevLead](devlead.md) | Lead × Standing | cross-vertical (the management character) | charter v0.1 |
 | Legal Admin | Executor × Standing | small law firms | planned |
 
 The library carries both kinds: **vertical-agnostic** classes (the Bookkeeper's books-and-tax shape fits any small business) and **vertical-specific** ones (a Legal Admin's obligations are particular to legal practice).
@@ -27,6 +28,8 @@ The [Bookkeeper](bookkeeper.md) charter has matured into a working framework pac
 pip install -e .            # the framework core (pure standard library)
 pip install -e ".[test]"    # + pytest / pytest-asyncio to run the suite
 ```
+
+The package ships a PEP 561 `py.typed` marker, so its types are visible to a consumer's type checker. One caveat: the marker alone does **not** carry through a *sibling-editable* install — a PEP 660 editable install stays invisible to mypy even with the marker. For a clean consumer-mypy story, install the framework **non-editable** (`pip install .`, as CI does) or, if you need the editable dev flow, add `MYPYPATH` / `editable_mode=compat`.
 
 ### A minimal runnable example
 
