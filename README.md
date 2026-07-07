@@ -29,6 +29,8 @@ pip install -e .            # the framework core (pure standard library)
 pip install -e ".[test]"    # + pytest / pytest-asyncio to run the suite
 ```
 
+The package ships a PEP 561 `py.typed` marker, so its types are visible to a consumer's type checker. One caveat: the marker alone does **not** carry through a *sibling-editable* install — a PEP 660 editable install stays invisible to mypy even with the marker. For a clean consumer-mypy story, install the framework **non-editable** (`pip install .`, as CI does) or, if you need the editable dev flow, add `MYPYPATH` / `editable_mode=compat`.
+
 ### A minimal runnable example
 
 Implement one port (a list-backed `LedgerSource`), build a `BookkeeperConfig` with a small chart of accounts, and run the `categorize` skill for a period. The skill reads the period and **proposes** a chart account per transaction — an explicit owner rule pre-fills at full confidence, a chart match at a scaled confidence, and anything it can't place confidently is **flagged for a human, never given a fabricated account**. It writes nothing: its only ledger-touching argument is the read-side `LedgerSource`, so it *cannot* publish (charter §5.4).

@@ -24,6 +24,11 @@ test = [
 [tool.setuptools]
 packages = ["bookkeeper", "bookkeeper.skills"]
 
+# Ship the PEP 561 marker so consumers' type checkers see the package as typed.
+# setuptools does not include marker files in the wheel unless declared here.
+[tool.setuptools.package-data]
+bookkeeper = ["py.typed"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
