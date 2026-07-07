@@ -8,7 +8,7 @@ Each class is anchored by a **charter** — a durable specification a deployment
 
 | Class | Position × Lifecycle | Vertical | Status |
 |---|---|---|---|
-| [Bookkeeper](bookkeeper.md) | Executor × Standing | vertical-agnostic (any small business) | charter v0.1 · framework **v0.1.0 shipped** |
+| [Bookkeeper](bookkeeper.md) | Executor × Standing | vertical-agnostic (any small business) | charter v0.1 · framework **v0.2.0 shipped** (typed, PEP 561) |
 | [DevLead](devlead.md) | Lead × Standing | cross-vertical (the management character) | charter v0.1 |
 | Legal Admin | Executor × Standing | small law firms | planned |
 
