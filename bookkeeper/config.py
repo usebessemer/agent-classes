@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
 from types import MappingProxyType
+from typing import cast
 
 # Well-known key in `confidence_thresholds` for the attribute→file boundary.
 # Its presence is what flips the boundary from inert to live (see §5).
@@ -178,9 +179,19 @@ class BookkeeperConfig:
             attribution_targets=tuple(data["attribution_targets"]),  # type: ignore[arg-type]
             books_location=str(data["books_location"]),
             intake_channel=str(data["intake_channel"]),
-            confidence_thresholds=dict(data.get("confidence_thresholds") or {}),  # type: ignore[arg-type]
+            # `data` values are untyped (`Mapping[str, object]`). For the two
+            # `dict()` casts here, narrow with `cast` rather than a
+            # `# type: ignore`: an ignore code pinned to one mypy classification
+            # drifts silently across versions (these were written for `[arg-type]`;
+            # mypy 2.3.0 reclassifies the overloaded `dict()` call to
+            # `[call-overload]`), whereas a `cast` doesn't reclassify.
+            confidence_thresholds=dict(
+                cast(Mapping[str, float], data.get("confidence_thresholds") or {})
+            ),
             materiality_floor=_to_decimal(data.get("materiality_floor")),
-            owner_policies=dict(data.get("owner_policies") or {}),  # type: ignore[arg-type]
+            owner_policies=dict(
+                cast(Mapping[str, str], data.get("owner_policies") or {})
+            ),
             prior_period_state=data.get("prior_period_state"),  # type: ignore[arg-type]
             reconcile_date_window_days=data.get("reconcile_date_window_days"),  # type: ignore[arg-type]
         )
