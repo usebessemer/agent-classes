@@ -22,12 +22,15 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["bookkeeper", "bookkeeper.skills"]
+# jr_analyst ships as a flat second package in this same distribution — no
+# separate pyproject/version/CI job; the root pytest and version cover it.
+packages = ["bookkeeper", "bookkeeper.skills", "jr_analyst", "jr_analyst.skills"]
 
 # Ship the PEP 561 marker so consumers' type checkers see the package as typed.
 # setuptools does not include marker files in the wheel unless declared here.
 [tool.setuptools.package-data]
 bookkeeper = ["py.typed"]
+jr_analyst = ["py.typed"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
