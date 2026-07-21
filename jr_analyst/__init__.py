@@ -24,6 +24,7 @@ read-only source ports are the first slices on it.
 """
 
 from jr_analyst.certainty import CANNOT_ORDER, CannotOrder, derive_certainty
+from jr_analyst.config import DEFAULT_ALIGN_ON, AnalystConfig, AnalystConfigError
 from jr_analyst.model import (
     ActualLine,
     AlignedDataset,
@@ -51,4 +52,8 @@ __all__ = [
     "derive_certainty",
     "CannotOrder",
     "CANNOT_ORDER",
+    # per-instance config surface (fail-fast validated; adapters bind it)
+    "AnalystConfig",
+    "AnalystConfigError",
+    "DEFAULT_ALIGN_ON",
 ]
