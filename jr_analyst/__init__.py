@@ -19,8 +19,27 @@ system-specific. Adapters and instance config live in the private instance repo,
 never in this package.
 
 The public surface is populated as the v1 skills land (model, ports, certainty,
-config, and the `ingest_and_align` build); this scaffold intentionally exports
-nothing yet.
+config, and the `ingest_and_align` build); the frozen data model is the first
+slice on it.
 """
 
-__all__: list[str] = []
+from jr_analyst.model import (
+    ActualLine,
+    AlignedDataset,
+    AlignedPair,
+    BudgetLine,
+    Certainty,
+    UnmappedKind,
+    UnmappedLine,
+)
+
+__all__ = [
+    # data model (the frozen surface for slice 1)
+    "Certainty",
+    "ActualLine",
+    "BudgetLine",
+    "AlignedPair",
+    "UnmappedKind",
+    "UnmappedLine",
+    "AlignedDataset",
+]
