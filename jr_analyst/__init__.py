@@ -19,8 +19,8 @@ system-specific. Adapters and instance config live in the private instance repo,
 never in this package.
 
 The public surface is populated as the v1 skills land (model, ports, certainty,
-config, and the `ingest_and_align` build); the frozen data model is the first
-slice on it.
+config, and the `ingest_and_align` build); the frozen data model and the
+read-only source ports are the first slices on it.
 """
 
 from jr_analyst.model import (
@@ -32,6 +32,7 @@ from jr_analyst.model import (
     UnmappedKind,
     UnmappedLine,
 )
+from jr_analyst.ports import ActualsSource, BudgetSource
 
 __all__ = [
     # data model (the frozen surface for slice 1)
@@ -42,4 +43,7 @@ __all__ = [
     "UnmappedKind",
     "UnmappedLine",
     "AlignedDataset",
+    # read-only source ports (adapters live in the private instance repo)
+    "ActualsSource",
+    "BudgetSource",
 ]
