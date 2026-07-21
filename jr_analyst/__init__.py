@@ -23,6 +23,7 @@ config, and the `ingest_and_align` build); the frozen data model and the
 read-only source ports are the first slices on it.
 """
 
+from jr_analyst.certainty import CANNOT_ORDER, CannotOrder, derive_certainty
 from jr_analyst.model import (
     ActualLine,
     AlignedDataset,
@@ -46,4 +47,8 @@ __all__ = [
     # read-only source ports (adapters live in the private instance repo)
     "ActualsSource",
     "BudgetSource",
+    # certainty-ladder helper (the adapter stamps grades with it; read-only)
+    "derive_certainty",
+    "CannotOrder",
+    "CANNOT_ORDER",
 ]
