@@ -35,6 +35,7 @@ from jr_analyst.model import (
     UnmappedLine,
 )
 from jr_analyst.ports import ActualsSource, BudgetSource
+from jr_analyst.skills import ingest_and_align
 
 __all__ = [
     # data model (the frozen surface for slice 1)
@@ -56,4 +57,6 @@ __all__ = [
     "AnalystConfig",
     "AnalystConfigError",
     "DEFAULT_ALIGN_ON",
+    # skills (the charter computation surface; read-only, one module each)
+    "ingest_and_align",
 ]
