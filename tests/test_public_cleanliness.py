@@ -8,11 +8,15 @@ leaked in, guarding the line against regression.
 Adapters and instance config (which legitimately reference these systems) live
 in the private instance repo, never here — so they are never scanned.
 
-Scan root (widened per issue #7). Beyond the `bookkeeper/` package it now also
-covers the public docs and the test suite — the places a client name or secret
-is just as likely to slip in as in code:
+Scan root (widened per issue #7, extended to `jr_analyst` per issue #8). Beyond
+the framework packages it also covers the public docs and the test suite — the
+places a client name or secret is just as likely to slip in as in code:
 
-    README.md  bookkeeper.md  class-template.md  pyproject.toml  bookkeeper/  tests/
+    README.md  bookkeeper.md  class-template.md  pyproject.toml
+    bookkeeper/  jr_analyst/  examples/  tests/
+
+Flat-A: one gate covers both framework packages; the scan root stays the repo
+root, so a leak into either package (or the shared docs/tests) is caught here.
 
 Context-awareness — the two named traps *and* the legitimate mentions
 ------------------------------------------------------------------------
@@ -49,12 +53,14 @@ _REPO_ROOT = Path(bookkeeper.__file__).resolve().parent.parent
 _GUARD_FILE = Path(__file__).resolve()
 
 # Named public-surface files at the repo root, plus every source file under the
-# package and the test suite. Suffixes kept narrow (source + docs + config) so a
-# stray binary/cache file is never read.
+# framework packages and the test suite. Suffixes kept narrow (source + docs +
+# config) so a stray binary/cache file is never read.
 _ROOT_DOCS = ("README.md", "bookkeeper.md", "class-template.md", "pyproject.toml")
 # `examples/` is public too (the README quickstart runs it), so it is scanned
-# alongside the package and the test suite.
-_SCAN_PACKAGES = ("bookkeeper", "tests", "examples")
+# alongside the framework packages and the test suite. `jr_analyst` joins the
+# scan under the same flat-A gate as `bookkeeper` (issue #8); the analyst's own
+# tests already fall under `tests/`.
+_SCAN_PACKAGES = ("bookkeeper", "jr_analyst", "tests", "examples")
 _SCAN_SUFFIXES = (".py", ".md", ".toml")
 
 # Tokens that must never appear in the public framework. Case-insensitive
@@ -140,13 +146,16 @@ def _line_hits(text: str, token: str) -> int:
 
 def test_there_are_sources_to_scan():
     # Guard against a path mistake silently passing the gate: the scan must cover
-    # both the package and the widened root (docs + tests), or it proves nothing.
+    # both framework packages and the widened root (docs + tests), or it proves
+    # nothing. The `jr_analyst` anchor sits in the nested `skills/` dir, so it
+    # also proves the rglob reaches into the package, not just its top level.
     scanned = {_relpath(p) for p in _scan_paths()}
     assert scanned, "no sources found to scan"
     for expected in (
         "bookkeeper.md",
         "pyproject.toml",
         "bookkeeper/orchestrator.py",
+        "jr_analyst/skills/ingest_and_align.py",
         "examples/quickstart.py",
     ):
         assert expected in scanned, f"widened scan is missing {expected}"
