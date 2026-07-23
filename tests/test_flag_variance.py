@@ -242,6 +242,23 @@ def test_boundary_equal_delta_suppressed_strict_greater_than():
     assert report.flags == ()  # abs(delta) == floor → not strictly over → suppressed
 
 
+def test_non_finite_floor_surfaces_every_variance_fail_safe():
+    """Fail-safe: a non-finite floor surfaces a real variance — never suppresses, never crashes.
+
+    The config layer coerces the floor with `Decimal(str(...))` and passes
+    `Infinity` / `NaN` through verbatim. Left unguarded, `abs(delta) <= Infinity`
+    is always `True` (every variance silently suppressed — a watchdog gone dark)
+    and `abs(delta) <= NaN` raises `decimal.InvalidOperation`. The `is_finite()`
+    guard treats a non-finite floor as inert (the inverted default): surface
+    everything. A real +8000 variance must still be surfaced under either.
+    """
+    dataset = an_aligned_dataset(aligned=(_pair(actual="9000.00", budget="1000.00"),))  # +8000
+    for floor in (Decimal("Infinity"), Decimal("NaN")):
+        report = flag_variance(dataset, make_config(variance_floor=floor))
+        assert _kinds(report) == [VarianceKind.OVER_BUDGET], f"floor={floor} suppressed a variance"
+        assert report.flags[0].delta == Decimal("8000.00")
+
+
 # --- scope: only `aligned`, window from dataset -----------------------------
 
 

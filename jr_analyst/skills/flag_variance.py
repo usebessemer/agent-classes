@@ -58,7 +58,13 @@ the check, here an unset floor surfaces **every** non-zero-delta pair (none
 suppressed): for a read-only analyst "inert" means *show everything*, never
 *hide everything*. A zero delta is never surfaced (there is no variance to flag),
 and a delta exactly equal to the floor is suppressed (the comparison is strict
-`>`).
+`>`). A **non-finite** floor is inert for the same fail-safe reason: the config
+layer coerces the floor with `Decimal(str(...))` and passes `Infinity` / `NaN`
+through verbatim, so the comparison guards `floor.is_finite()` — an `Infinity`
+floor would otherwise silently suppress *every* variance (a watchdog gone dark,
+undetectable to a human reading a clean report) and a `NaN` floor would raise on
+the first real variance. A floor the analyst cannot meaningfully compare against
+surfaces everything; it never hides.
 """
 
 from __future__ import annotations
@@ -169,10 +175,14 @@ def flag_variance(dataset: AlignedDataset, config: AnalystConfig) -> VarianceRep
        budget.amount`; classify by sign (`> 0` → `OVER_BUDGET`, `< 0` →
        `UNDER_BUDGET`).
     2. Surface by materiality: a zero delta is never surfaced (no variance to
-       flag). With `config.variance_floor` **set**, surface a pair iff `abs(delta)`
-       is **strictly over** the floor (a delta exactly at the floor is suppressed).
-       With it **unset** (`None`), the default is *inverted* — surface **every**
-       non-zero-delta pair, none suppressed (charter §3/§5.4).
+       flag). With `config.variance_floor` a **finite set** value, surface a pair
+       iff `abs(delta)` is **strictly over** the floor (a delta exactly at the
+       floor is suppressed). With it **unset** (`None`) **or non-finite**
+       (`Infinity` / `NaN`), the default is *inverted* — surface **every**
+       non-zero-delta pair, none suppressed (charter §3/§5.4). The `is_finite()`
+       guard is the fail-safe: a floor the analyst cannot compare against surfaces
+       everything rather than silently suppressing all (`Infinity`) or raising
+       (`NaN`) — a watchdog never goes dark.
     3. Return the `VarianceReport`, `window` carried from the dataset — flags
        grouped `OVER_BUDGET` then `UNDER_BUDGET`, each in `dataset.aligned` read
        order. **Advisory: writes nothing, mutates neither input, blocks no
@@ -195,10 +205,15 @@ def flag_variance(dataset: AlignedDataset, config: AnalystConfig) -> VarianceRep
             # No variance to flag — a flag *is* a surfaced material variance, so a
             # zero delta produces no flag (there is no `ON_TRACK` kind).
             continue
-        if floor is not None and abs(delta) <= floor:
+        if floor is not None and floor.is_finite() and abs(delta) <= floor:
             # Below or exactly at the materiality floor — suppressed (strict `>`).
-            # Only when the floor is *set*: an unset floor surfaces every non-zero
-            # delta (the inverted default), so this suppression never applies then.
+            # Only when the floor is a *finite set* value: an unset floor (`None`)
+            # OR a non-finite one (`Infinity` / `NaN`, which the config layer passes
+            # through verbatim) surfaces every non-zero delta instead — the fail-safe
+            # inverted default. A `< = Infinity` guard would silently suppress *all*
+            # variances (a watchdog gone dark, undetectable to a human reading a
+            # clean report) and `<= NaN` would raise — either would break the
+            # surface-everything contract, so a non-finite floor is treated as inert.
             continue
         kind = VarianceKind.OVER_BUDGET if delta > _ZERO else VarianceKind.UNDER_BUDGET
         flag = VarianceFlag(
