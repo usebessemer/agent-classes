@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bookkeeper"
-version = "0.2.0"
+version = "0.3.0"
 description = "The Bessemer Bookkeeper agent-class framework: the adapter-agnostic core (skill ports, the Standing-executor orchestrator with the §5 fail-safe, the §3 config schema, and the Contract A/B interfaces)."
 readme = "README.md"
 requires-python = ">=3.12"
