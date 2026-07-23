@@ -8,10 +8,13 @@ required field (`budget_source_ref`); `align_on` is optional and defaults to the
 conservative alignment grain when unset.
 """
 
+from decimal import Decimal
+
 import pytest
 
 from jr_analyst.config import (
     DEFAULT_ALIGN_ON,
+    _REQUIRED,
     AnalystConfig,
     AnalystConfigError,
 )
@@ -109,3 +112,104 @@ def test_align_on_is_an_immutable_tuple():
 def test_config_error_is_a_value_error():
     """`AnalystConfigError` is a `ValueError` (mirrors `ConfigError`), for callers that catch broadly."""
     assert issubclass(AnalystConfigError, ValueError)
+
+
+# --- variance_floor: the one materiality (surfacing) threshold, slice 2 ---------
+#
+# `variance_floor` is the single materiality floor `flag_variance` reads. It is a
+# *surfacing* threshold, never an autonomy/write boundary — the analyst is
+# structurally read-only. It is never required (unset → inert), and any present
+# value is coerced to exact `Decimal` so it never reaches a `Decimal` delta
+# comparison as a lossy `float`. These pin that shape.
+
+
+def test_variance_floor_unset_is_none():
+    """Unset `variance_floor` stays `None` — the inert (surface-every-variance) signal."""
+    cfg = AnalystConfig.from_mapping(_VALID)
+    assert cfg.variance_floor is None
+
+
+def test_variance_floor_is_never_required():
+    """`variance_floor` is not in `_REQUIRED`: a mapping without it still builds."""
+    assert "variance_floor" not in _REQUIRED
+    cfg = AnalystConfig.from_mapping(_VALID)  # no variance_floor present
+    assert isinstance(cfg, AnalystConfig)
+    assert cfg.variance_floor is None
+
+
+def test_variance_floor_present_does_not_satisfy_required():
+    """Supplying only `variance_floor` still fails fast on the missing required field.
+
+    Guards against `variance_floor` ever being mistaken for a required field: the
+    read-only analyst still cannot run without knowing where its budget lives.
+    """
+    with pytest.raises(AnalystConfigError) as excinfo:
+        AnalystConfig.from_mapping({"variance_floor": "1000"})
+    assert "budget_source_ref" in str(excinfo.value)
+
+
+def test_variance_floor_string_coerced_to_exact_decimal():
+    """A numeric-string floor is coerced to exact `Decimal` via `from_mapping`."""
+    cfg = AnalystConfig.from_mapping({**_VALID, "variance_floor": "1000.10"})
+    assert isinstance(cfg.variance_floor, Decimal)
+    assert cfg.variance_floor == Decimal("1000.10")
+
+
+def test_variance_floor_float_is_str_routed_not_noisy_binary():
+    """A float floor routes through `str()` → exact `Decimal("1000.10")`, not the lossy binary.
+
+    The tell that coercion went via `str()` and not `Decimal(float)`: the direct
+    `Decimal(1000.10)` carries the float's noisy binary expansion (`1000.0999…`),
+    so the coerced floor is *unequal* to it and equal to the exact decimal.
+    """
+    cfg = AnalystConfig.from_mapping({**_VALID, "variance_floor": 1000.10})
+    assert isinstance(cfg.variance_floor, Decimal)
+    assert cfg.variance_floor == Decimal("1000.10")
+    assert cfg.variance_floor != Decimal(1000.10)
+
+
+def test_variance_floor_blank_string_stays_none():
+    """A blank/whitespace `variance_floor` stays `None` (never fed to `Decimal`, which would raise)."""
+    cfg = AnalystConfig.from_mapping({**_VALID, "variance_floor": "   "})
+    assert cfg.variance_floor is None
+
+
+def test_variance_floor_coerced_on_direct_construction():
+    """`__post_init__` coerces a directly-constructed float floor to exact `Decimal`."""
+    cfg = AnalystConfig(
+        budget_source_ref="generic-budget-source",
+        variance_floor=1000.10,  # a float reaches the Decimal delta comparison safely
+    )
+    assert isinstance(cfg.variance_floor, Decimal)
+    assert cfg.variance_floor == Decimal("1000.10")
+
+
+def test_variance_floor_int_coerced_on_direct_construction():
+    """A directly-constructed int floor is coerced to `Decimal` too."""
+    cfg = AnalystConfig(budget_source_ref="generic-budget-source", variance_floor=1000)
+    assert isinstance(cfg.variance_floor, Decimal)
+    assert cfg.variance_floor == Decimal("1000")
+
+
+def test_variance_floor_decimal_and_string_pass_through_exactly():
+    """A `Decimal` (short-circuit) or numeric string preserves the exact value."""
+    as_decimal = AnalystConfig.from_mapping(
+        {**_VALID, "variance_floor": Decimal("250.00")}
+    )
+    assert as_decimal.variance_floor == Decimal("250.00")
+    as_string = AnalystConfig.from_mapping({**_VALID, "variance_floor": "250.00"})
+    assert isinstance(as_string.variance_floor, Decimal)
+    assert as_string.variance_floor == Decimal("250.00")
+
+
+def test_variance_floor_none_on_direct_construction():
+    """A directly-constructed config with no floor leaves it `None`."""
+    cfg = AnalystConfig(budget_source_ref="generic-budget-source")
+    assert cfg.variance_floor is None
+
+
+def test_variance_floor_is_immutable():
+    """The floor is frozen with the rest of the config — a run holds it, never sets it."""
+    cfg = AnalystConfig.from_mapping({**_VALID, "variance_floor": "500"})
+    with pytest.raises(Exception):
+        cfg.variance_floor = Decimal("1")  # type: ignore[misc]
