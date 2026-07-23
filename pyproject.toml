@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bookkeeper"
-version = "0.2.0"
+version = "0.3.0"
 description = "The Bessemer Bookkeeper agent-class framework: the adapter-agnostic core (skill ports, the Standing-executor orchestrator with the §5 fail-safe, the §3 config schema, and the Contract A/B interfaces)."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,12 +22,15 @@ test = [
 ]
 
 [tool.setuptools]
-packages = ["bookkeeper", "bookkeeper.skills"]
+# jr_analyst ships as a flat second package in this same distribution — no
+# separate pyproject/version/CI job; the root pytest and version cover it.
+packages = ["bookkeeper", "bookkeeper.skills", "jr_analyst", "jr_analyst.skills"]
 
 # Ship the PEP 561 marker so consumers' type checkers see the package as typed.
 # setuptools does not include marker files in the wheel unless declared here.
 [tool.setuptools.package-data]
 bookkeeper = ["py.typed"]
+jr_analyst = ["py.typed"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

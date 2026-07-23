@@ -58,4 +58,4 @@ def test_public_surface_is_importable():
     """Everything in __all__ resolves — `import bookkeeper` exposes the full core."""
     for name in bookkeeper.__all__:
         assert hasattr(bookkeeper, name), f"missing from package surface: {name}"
-    assert bookkeeper.__version__ == "0.1.0"
+    assert bookkeeper.__version__ == "0.3.0"
