@@ -118,10 +118,22 @@ def _an_unmapped_line() -> UnmappedLine:
 
 # --- the public surface ------------------------------------------------------
 
+# The full slice-3 surface #68 dual-exports: the operation + its inline result model.
+_PUBLIC_SURFACE = (
+    "build_report",
+    "ReportPackage",
+    "TargetRollup",
+    "CertaintySubtotal",
+    "PackageSummary",
+    "ReportBasis",
+    "PackageStatus",
+)
+
 
 def test_build_report_and_result_types_import_from_skill_module():
-    # #67 builds the skill module and its inline result types; the package-level
-    # dual-export is slice-3 close-out (#68), so this pins the module import path.
+    # #67 builds the skill module and its inline result types; #68 (this close-out)
+    # dual-exports them at the package level. This pins the module import path; the
+    # package-level dual-export is asserted below.
     assert callable(build_report)
     for cls in (
         ReportPackage,
@@ -132,6 +144,33 @@ def test_build_report_and_result_types_import_from_skill_module():
         PackageStatus,
     ):
         assert dataclasses.is_dataclass(cls) or issubclass(cls, __import__("enum").Enum)
+
+
+def test_build_report_surface_is_dual_exported_from_both_paths():
+    # #68 AC: the whole slice-3 surface re-exports through BOTH `jr_analyst.skills`
+    # and `jr_analyst` — present as an attribute, in each `__all__`, and the SAME
+    # object as the skill-module definition (no shadow re-declaration). Both import
+    # paths must resolve to one surface. The canonical objects are this module's own
+    # top-level `from jr_analyst.skills.build_report import ...` names (that form
+    # always reads the real submodule, unshadowed by the package re-export).
+    import jr_analyst
+    import jr_analyst.skills as skills_pkg
+
+    canonical = globals()
+    for name in _PUBLIC_SURFACE:
+        for package in (skills_pkg, jr_analyst):
+            assert hasattr(package, name), f"{name} not exported from {package.__name__}"
+            assert name in package.__all__, f"{name} missing from {package.__name__}.__all__"
+            assert getattr(package, name) is canonical[name], (
+                f"{package.__name__}.{name} is not the skill-module object"
+            )
+
+
+def test_no_jr_analyst_version_added():
+    """Slice 3 adds no `jr_analyst.__version__` — it shares the bookkeeper distribution."""
+    import jr_analyst
+
+    assert not hasattr(jr_analyst, "__version__")
 
 
 # --- pure + sync + no port; mutation-proven ---------------------------------
