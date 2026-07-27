@@ -10,6 +10,12 @@ generalized to the analyst's smaller, **read-only** surface. Two kinds of thing:
   and a bare `a_budget_line()` share the default alignment key
   (`DEFAULT_ALIGN_ON` = `(account, period)`) and pair 1:1 into a ready-made -200.00
   variance with no ceremony. A test overrides only the field it is exercising.
+  Slice 3 layers roll-up builders on these — `a_target_pair` (one pair under a
+  named attribution target), `a_multi_target_dataset` / `a_multi_grade_pairs` /
+  `a_cross_target_budget_pair`, and the `a_variance_flag` / `some_variance_flags`
+  / `a_variance_report` set that hand-builds a coherent `VarianceReport` for a
+  `build_report` test *without* re-running `flag_variance` — all reusing these
+  defaults, never changing the bare -200.00 builders.
 - **fakes** (`FakeActualsSource`, `FakeBudgetSource`) — in-memory implementations of
   the read-only source ports, each recording `self.fetched: list[str]` (the windows
   / periods requested, in order) so a test can prove the skill only ever *read*, and
@@ -25,6 +31,7 @@ root test suite can exercise the framework core. Not collected by pytest itself
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from decimal import Decimal
 
 from jr_analyst.config import AnalystConfig
@@ -37,6 +44,11 @@ from jr_analyst.model import (
     UnmappedLine,
 )
 from jr_analyst.ports import ActualsSource, BudgetSource
+from jr_analyst.skills.flag_variance import (
+    VarianceFlag,
+    VarianceKind,
+    VarianceReport,
+)
 
 # Aligned defaults — a bare actual and a bare budget line share these, so they
 # match on the default alignment grain (`(account, period)`) *and* on a finer
@@ -160,6 +172,261 @@ def make_config(**overrides: object) -> AnalystConfig:
     base: dict[str, object] = dict(budget_source_ref="generic-budget-source")
     base.update(overrides)
     return AnalystConfig.from_mapping(base)
+
+
+# --- slice-3 roll-up substrate: multi-target / multi-grade / cross-target -----
+# The builders a per-target roll-up (`build_report`, slice 3) test needs, layered
+# on the slice-1/-2 defaults above without touching the bare -200.00 builders. All
+# in-memory, generic accounts and `attribution_target_id`s (the generalized shape),
+# no client names — the same public-cleanliness contract the whole substrate keeps.
+
+#: A second generic attribution target, so a dataset can span ≥2 distinct targets
+#: (`DEFAULT_TARGET` is the first). Both are opaque, client-agnostic ids.
+SECOND_TARGET = "target-002"
+
+# Decimal zero for the sign classification in `a_variance_flag` (never `float`, so
+# the compare never mixes `Decimal` and `float`), mirroring `flag_variance._ZERO`.
+_ZERO = Decimal("0")
+
+
+def a_target_pair(
+    target: str,
+    *,
+    tag: str = "",
+    actual_amount: Decimal = Decimal("1500.00"),
+    budget_amount: Decimal = Decimal("1200.00"),
+    certainty: Certainty = Certainty.REALIZED_CLOSED,
+    account: str = DEFAULT_ACCOUNT,
+    period: str = DEFAULT_PERIOD,
+) -> AlignedPair:
+    """A 1:1 `AlignedPair` under one attribution `target`, both sides carrying it.
+
+    The per-target building block the multi-target / multi-grade helpers compose.
+    Both the actual and the budget carry `target` (so the pair aligns on the finer
+    `(account, attribution_target_id, period)` grain as well as the coarse default),
+    and each carries a `source_ref` namespaced by `target` — and by `tag` when given
+    — so every pair in a multi-pair dataset stays individually traceable. The
+    default amounts are a +300.00 over-budget variance; override either side for a
+    different sign or magnitude, or `certainty=` for the open grade.
+    """
+    suffix = f"-{tag}" if tag else ""
+    return an_aligned_pair(
+        actual=an_actual(
+            account=account,
+            attribution_target_id=target,
+            period=period,
+            amount=actual_amount,
+            source_ref=f"actual-{target}{suffix}",
+            certainty=certainty,
+        ),
+        budget=a_budget_line(
+            account=account,
+            attribution_target_id=target,
+            period=period,
+            amount=budget_amount,
+            source_ref=f"budget-{target}{suffix}",
+        ),
+    )
+
+
+def a_multi_target_dataset(
+    *,
+    targets: tuple[str, ...] = (DEFAULT_TARGET, SECOND_TARGET),
+    budget_amount: Decimal = Decimal("1000.00"),
+    window: str = DEFAULT_PERIOD,
+) -> AlignedDataset:
+    """An `AlignedDataset` spanning ≥2 distinct `actual.attribution_target_id`s.
+
+    One `a_target_pair` per entry in `targets` (default two), each with its own
+    target *and* its own `source_ref` — so a per-target roll-up test can group the
+    flags by `pair.actual.attribution_target_id` and prove the groups stay distinct.
+    Each target gets a distinct over-budget magnitude (target *i* is `+100*(i+1)`
+    over `budget_amount`), so per-target roll-up sums differ and a merged-vs-grouped
+    bug is visible. `window` labels the analysis window carried onto the dataset.
+    """
+    pairs = tuple(
+        a_target_pair(
+            target,
+            actual_amount=budget_amount + Decimal(100 * (index + 1)),
+            budget_amount=budget_amount,
+        )
+        for index, target in enumerate(targets)
+    )
+    return an_aligned_dataset(aligned=pairs, window=window)
+
+
+def a_multi_grade_pairs(
+    *,
+    target: str = DEFAULT_TARGET,
+    closed_actual: Decimal = Decimal("1500.00"),
+    open_actual: Decimal = Decimal("400.00"),
+    budget_amount: Decimal = Decimal("1200.00"),
+    account: str = DEFAULT_ACCOUNT,
+    period: str = DEFAULT_PERIOD,
+) -> tuple[AlignedPair, AlignedPair]:
+    """Two pairs under the SAME `target`, graded `realized_closed` and `realized_open`.
+
+    The substrate for grade-separation: a per-target roll-up must not blindly sum a
+    closed variance and an open one into a single ungraded figure — the ladder grade
+    rides through. Both pairs share `target` (and account/period) but carry
+    grade-tagged `source_ref`s so the two rows stay distinguishable. The closed pair
+    is a +300.00 over-budget variance, the open one a -800.00 under-budget
+    (actuals-to-date) variance, so a naive cross-grade sum (-500.00) is visibly
+    wrong against the grade-separated pair.
+    """
+    closed = a_target_pair(
+        target,
+        tag="closed",
+        actual_amount=closed_actual,
+        budget_amount=budget_amount,
+        certainty=Certainty.REALIZED_CLOSED,
+        account=account,
+        period=period,
+    )
+    open_pair = a_target_pair(
+        target,
+        tag="open",
+        actual_amount=open_actual,
+        budget_amount=budget_amount,
+        certainty=Certainty.REALIZED_OPEN,
+        account=account,
+        period=period,
+    )
+    return (closed, open_pair)
+
+
+def a_cross_target_budget_pair(
+    *,
+    actual_target: str = DEFAULT_TARGET,
+    budget_target: str = SECOND_TARGET,
+    account: str = DEFAULT_ACCOUNT,
+    period: str = DEFAULT_PERIOD,
+    actual_amount: Decimal = Decimal("1500.00"),
+    budget_amount: Decimal = Decimal("1200.00"),
+) -> AlignedPair:
+    """A pair whose budget carries a DIFFERENT target than its actual — the grouping-dimension trap.
+
+    Under the conservative default `align_on=('account','period')` this pair aligns
+    1:1 (both sides share account + period) even though
+    `budget.attribution_target_id` (`budget_target`) differs from
+    `actual.attribution_target_id` (`actual_target`). A per-target roll-up keyed off
+    the actual's target must not assume the budget agrees on that dimension — on the
+    finer `(account, attribution_target_id, period)` grain this same pair would not
+    align at all. `actual_target` and `budget_target` must differ (asserted).
+    """
+    assert actual_target != budget_target, "a cross-target pair needs two distinct targets"
+    return an_aligned_pair(
+        actual=an_actual(
+            account=account,
+            attribution_target_id=actual_target,
+            period=period,
+            amount=actual_amount,
+            source_ref=f"actual-{actual_target}",
+        ),
+        budget=a_budget_line(
+            account=account,
+            attribution_target_id=budget_target,
+            period=period,
+            amount=budget_amount,
+            source_ref=f"budget-{budget_target}",
+        ),
+    )
+
+
+def _flag_reason(pair: AlignedPair, delta: Decimal, kind: VarianceKind) -> str:
+    """A §1-traceable fixture reason — both `source_ref`s, both amounts, the delta, the grade.
+
+    Mirrors the shape of `flag_variance`'s own reason without importing that skill's
+    private helper, so the substrate stays self-contained yet a `build_report` test
+    inspecting a flag's `reason` sees the same traceable fields a real run carries.
+    """
+    direction = "over" if kind is VarianceKind.OVER_BUDGET else "under"
+    return (
+        f"Actual {pair.actual.source_ref!r} ({pair.actual.amount}, grade "
+        f"{pair.certainty.value}) is {direction} budget {pair.budget.source_ref!r} "
+        f"({pair.budget.amount}) by {delta} (test-substrate fixture)."
+    )
+
+
+def a_variance_flag(
+    pair: AlignedPair,
+    *,
+    kind: VarianceKind | None = None,
+    delta: Decimal | None = None,
+    certainty: Certainty | None = None,
+    reason: str | None = None,
+) -> VarianceFlag:
+    """One `VarianceFlag`, coherent with `pair` by default — a `build_report` input without the skill.
+
+    Derives the signed exact-`Decimal` delta (`actual.amount - budget.amount`), the
+    over/under `kind` from its sign, and the `certainty` from `pair.certainty`
+    verbatim — the same coherence `flag_variance` produces, hand-built so a
+    `build_report` test never re-runs the slice-2 skill. Any field can be overridden
+    to construct a deliberately-inconsistent flag; `reason` defaults to the
+    traceable `_flag_reason`. A zero-delta pair has no variance to flag, so an
+    unclassifiable call (delta 0, no explicit `kind`) raises rather than guessing a
+    side — a real `VarianceFlag` is always a surfaced *non-zero* variance.
+    """
+    signed = (pair.actual.amount - pair.budget.amount) if delta is None else delta
+    if kind is None:
+        if signed == _ZERO:
+            raise ValueError(
+                "a zero-delta pair has no variance to flag — pass an explicit kind "
+                "or a non-zero pair (a real VarianceFlag is always a surfaced "
+                "non-zero variance)"
+            )
+        resolved_kind = (
+            VarianceKind.OVER_BUDGET if signed > _ZERO else VarianceKind.UNDER_BUDGET
+        )
+    else:
+        resolved_kind = kind
+    resolved_certainty = certainty if certainty is not None else pair.certainty
+    resolved_reason = (
+        reason if reason is not None else _flag_reason(pair, signed, resolved_kind)
+    )
+    return VarianceFlag(
+        kind=resolved_kind,
+        delta=signed,
+        certainty=resolved_certainty,
+        reason=resolved_reason,
+        pair=pair,
+    )
+
+
+def some_variance_flags(pairs: Sequence[AlignedPair]) -> tuple[VarianceFlag, ...]:
+    """One coherent `VarianceFlag` per pair, in the given order — no grouping, no floor.
+
+    A thin fan of `a_variance_flag` over `pairs`: the caller controls which pairs
+    become flags and in what order, so a `build_report` test assembles exactly the
+    report it needs. Unlike `flag_variance` this applies no materiality floor and
+    skips no pair — it is a fixture, not the skill (so every pair must carry a
+    non-zero variance, per `a_variance_flag`).
+    """
+    return tuple(a_variance_flag(pair) for pair in pairs)
+
+
+def a_variance_report(
+    *,
+    pairs: Sequence[AlignedPair] | None = None,
+    flags: Sequence[VarianceFlag] | None = None,
+    window: str = DEFAULT_PERIOD,
+) -> VarianceReport:
+    """A coherent `VarianceReport` for a `build_report` test — assembled without running `flag_variance`.
+
+    Pass `pairs` to derive one coherent flag per pair (via `some_variance_flags`),
+    or `flags` to wrap hand-built flags verbatim; supplying both is a caller error.
+    A bare call wraps the single bare -200.00 pair. `window` labels the analysis
+    window carried onto the report, exactly as `flag_variance` carries
+    `dataset.window` — the field `build_report` reads back for its package scope.
+    """
+    if pairs is not None and flags is not None:
+        raise ValueError("pass either pairs or flags, not both")
+    resolved = (
+        flags
+        if flags is not None
+        else some_variance_flags(pairs if pairs is not None else (an_aligned_pair(),))
+    )
+    return VarianceReport(window=window, flags=tuple(resolved))
 
 
 class FakeActualsSource(ActualsSource):
