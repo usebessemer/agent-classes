@@ -36,9 +36,16 @@ from jr_analyst.model import (
 )
 from jr_analyst.ports import ActualsSource, BudgetSource
 from jr_analyst.skills import (
+    CertaintySubtotal,
+    PackageStatus,
+    PackageSummary,
+    ReportBasis,
+    ReportPackage,
+    TargetRollup,
     VarianceFlag,
     VarianceKind,
     VarianceReport,
+    build_report,
     flag_variance,
     ingest_and_align,
 )
@@ -69,4 +76,12 @@ __all__ = [
     "VarianceReport",
     "VarianceFlag",
     "VarianceKind",
+    "build_report",
+    # build_report's Contract-A result model (proposed, per-target, partial-period honest)
+    "ReportPackage",
+    "TargetRollup",
+    "CertaintySubtotal",
+    "PackageSummary",
+    "ReportBasis",
+    "PackageStatus",
 ]

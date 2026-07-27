@@ -18,8 +18,26 @@ The v1 build lands here one skill at a time. Built so far:
   under classification) above the materiality floor (charter `flagVariance`,
   §3/§5.4). A pure, **sync** reader (it drives no port); returns a
   `VarianceReport`, proposes-not-writes, non-forecasting.
+- `build_report` — the Contract-A assembler: compose an already-computed
+  `AlignedDataset` and `VarianceReport` into one PROPOSED `ReportPackage`, plus
+  a per-target roll-up (actuals subtotalled per certainty grade, budget referents
+  summed separately and never differenced) — charter `buildReport`, §4. Pure and
+  **sync**, port-free; assembles-not-writes, and stays on the slice-3 (assembly)
+  side of the slice-4 (narrative) line — no ranking, no forecast, no remaining.
+  Its inline frozen result model (`ReportPackage` / `TargetRollup` /
+  `CertaintySubtotal` / `PackageSummary` / `ReportBasis` / `PackageStatus`)
+  re-exports here alongside the operation.
 """
 
+from jr_analyst.skills.build_report import (
+    CertaintySubtotal,
+    PackageStatus,
+    PackageSummary,
+    ReportBasis,
+    ReportPackage,
+    TargetRollup,
+    build_report,
+)
 from jr_analyst.skills.flag_variance import (
     VarianceFlag,
     VarianceKind,
@@ -34,4 +52,11 @@ __all__ = [
     "VarianceReport",
     "VarianceFlag",
     "VarianceKind",
+    "build_report",
+    "ReportPackage",
+    "TargetRollup",
+    "CertaintySubtotal",
+    "PackageSummary",
+    "ReportBasis",
+    "PackageStatus",
 ]
