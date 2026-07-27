@@ -114,9 +114,15 @@ class AlignedPair:
     """One actual aligned 1:1 to the budget target it belongs to.
 
     The confident output of `ingest_and_align`: an `ActualLine` and the single
-    `BudgetLine` it matched on `(account, attribution_target_id, period)`. Strictly
-    1:1 — no zero-side pairs and no fabricated `Decimal("0")`; a line with no
-    counterpart is escalated as an `UnmappedLine`, never padded into a pair.
+    `BudgetLine` it matched on the configured grain `config.align_on` — the
+    conservative default `(account, period)`, or the finer
+    `(account, attribution_target_id, period)` an instance that budgets per target
+    sets. Strictly 1:1 — no zero-side pairs and no fabricated `Decimal("0")`; a
+    line with no counterpart is escalated as an `UnmappedLine`, never padded into a
+    pair. Under the coarse default a pair can match though its budget names a
+    *different* attribution target than the actual — the cross-target grain gap
+    `build_report`'s per-target roll-up surfaces (via `budget_referents_cross_target`),
+    never silently reconciled.
 
     The pair exposes the actual's ladder grade verbatim via `certainty` (a
     property, so it can never drift from `actual.certainty`), which is what keeps

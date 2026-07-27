@@ -26,15 +26,16 @@ An **agnostic core driven through read-only ports**, mirroring the Bookkeeper's 
 | [`ports.py`](ports.py) | The two read ports — `ActualsSource` and `BudgetSource`. **There is no sink port:** the analyst has no seam through which to write. That is the charter §5 boundary made structural. |
 | [`certainty.py`](certainty.py) | `derive_certainty(period, prior_period_state)` — the pure closed-vs-open grading rule an adapter stamps each actual with, with a distinct `CANNOT_ORDER` fail-safe. |
 | [`config.py`](config.py) | `AnalystConfig` — the typed, frozen per-instance surface, fail-fast validated (`from_mapping` reports every missing required field at once). |
-| [`skills/`](skills/) | One module per charter skill. Slice 1: [`ingest_and_align`](skills/ingest_and_align.py). Slice 2: [`flag_variance`](skills/flag_variance.py). |
+| [`skills/`](skills/) | One module per charter skill. Slice 1: [`ingest_and_align`](skills/ingest_and_align.py). Slice 2: [`flag_variance`](skills/flag_variance.py). Slice 3: [`build_report`](skills/build_report.py). |
 
 ## Status
 
-Charter v0.1 · slices 1–2 built.
+Charter v0.1 · slices 1–3 built.
 
 - **`ingest_and_align`** — **built** (slice 1). Aligns certainty-tagged realized actuals to the budget 1:1 and escalates the rest.
 - **`flag_variance`** — **built** (slice 2). Reads the aligned pairs and surfaces each material actual-vs-budget variance — a signed exact-`Decimal` delta, classified over-/under-budget, above the `variance_floor`. A pure, **sync** reader (it drives no port): it proposes a graded, traceable flag and writes nothing.
-- **`build_report` / `explain_variance`** — **planned** (slices 3–4), along with the forward-looking `committed` / `anticipated` ladder rungs as input extensions.
+- **`build_report`** — **built** (slice 3). Composes the `ingest_and_align` dataset and the `flag_variance` report into one **PROPOSED** `ReportPackage` (Contract A): the aligned pairs, variances, and escalations carried **verbatim**, plus a **per-target roll-up** that groups the actuals by attribution target and subtotals each target **per certainty grade** (exact `Decimal`, no cross-grade blend), with the matched budget referents summed **separately** on an `ACTUALS_TO_DATE` basis — carried alongside and **never differenced**. A pure, **sync** assembler that drives no port and writes nothing; assembly-only — no narrative, ranking, or forecast. Result model (`ReportPackage` / `TargetRollup` / `CertaintySubtotal` / `PackageSummary` / `ReportBasis` / `PackageStatus`) dual-exports from `jr_analyst` and `jr_analyst.skills`.
+- **`explain_variance`** — **planned** (slice 4), along with the forward-looking `committed` / `anticipated` ladder rungs as input extensions.
 
 ## Illustrative usage
 
