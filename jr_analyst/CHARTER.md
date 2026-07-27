@@ -1,6 +1,6 @@
 # jr-analyst: agent class charter (v0.1)
 
-> `jr-analyst` (Junior Analyst) is the (**Executor**, **Standing**, **FP&A**) binding from the [agent-role topology](https://github.com/usebessemer/research/blob/main/theory/agent-role-topology.md), the standing variant: it wakes on a recurring schedule against a durable charter, reads the books' actuals-to-date, and hands a human a budget-aligned, certainty-graded review surface. Status: v0.1 (a target skeleton; slice 1 — `ingest_and_align` — built). The FP&A counterpart to the Bookkeeper's Accounting track, and the second concrete class in the library.
+> `jr-analyst` (Junior Analyst) is the (**Executor**, **Standing**, **FP&A**) binding from the [agent-role topology](https://github.com/usebessemer/research/blob/main/theory/agent-role-topology.md), the standing variant: it wakes on a recurring schedule against a durable charter, reads the books' actuals-to-date, and hands a human a budget-aligned, certainty-graded review surface. Status: v0.1 (a target skeleton; slices 1–2 — `ingest_and_align`, `flag_variance` — built). The FP&A counterpart to the Bookkeeper's Accounting track, and the second concrete class in the library.
 
 ## 1. What it is
 
@@ -27,7 +27,7 @@ A note on the recursion: the Bookkeeper charter (§2) excludes "a separate analy
 
 ## 3. Context (per-instance fields, the class/instance seam)
 
-State the class holds; **every value is set per instance**, none live in the class body. This is the move that keeps the class reusable. The two fields marked *(config)* are bound today in [`config.py`](config.py)'s `AnalystConfig`; the rest are charter-level fields an adapter binds.
+State the class holds; **every value is set per instance**, none live in the class body. This is the move that keeps the class reusable. The three fields marked *(config)* are bound today in [`config.py`](config.py)'s `AnalystConfig`; the rest are charter-level fields an adapter binds.
 
 | Field | What it is |
 |---|---|
@@ -37,16 +37,16 @@ State the class holds; **every value is set per instance**, none live in the cla
 | `attributionTargets` | The registry of §3 targets actuals attribute to (job / project / cost-centre / GL-only), resolved **upstream** by the Bookkeeper — an `ActualLine` always knows its target. The analyst reads the registry; it never grows it. |
 | `actualsBinding` / `budgetBinding` | The concrete `ActualsSource` / `BudgetSource` adapters — the Bookkeeper pipeline's output, and the budget system of record. Swappable config values; the adapters live in the private instance repo. |
 | `periodGrain` | The period-label format the ladder orders on — quarterly (`YYYY-Qn`) or monthly (`YYYY-MM`). A mixed or unparseable pair is not silently ordered; it escalates (§5). |
-| `varianceThresholds` *(planned)* | The materiality floor above which `flag_variance` surfaces an actual-vs-budget gap (slice 2). Unset → inert: every variance surfaced, none suppressed. |
+| `varianceFloor` *(config)* | The **singular scalar** materiality floor (bound as `variance_floor` in [`config.py`](config.py)) above which `flag_variance` ([BUILT], slice 2) surfaces an actual-vs-budget gap — a variance clears it when `abs(delta)` is *strictly* over the floor. Unset → inert in the analyst's *inverted* sense: every non-zero variance surfaced, none suppressed — for a read-only analyst 'inert' means *show everything*, never hide. |
 | `schedule` | When the standing analyst wakes — per period, or intra-period against actuals-to-date. |
 | `identityStack` | The client repo's root **L0 contract** (its root instruction file) + this charter, stacked at spawn to form its identity. |
 
 ## 4. Skills (methods)
 
-**[BUILT]** = implemented today · **[PLANNED]** = on the class roadmap (slices 2–4). The autonomy line for each is in §5. Each skill is a read-only computation over what the ports yield — the analyst counterpart to the Bookkeeper's detection-only `reconcileAccount`: a pure aligner over async read ports, count-conserving, surface-don't-resolve.
+**[BUILT]** = implemented today · **[PLANNED]** = on the class roadmap (slices 3–4). The autonomy line for each is in §5. Each skill is a read-only computation over what the ports yield — the analyst counterpart to the Bookkeeper's detection-only `reconcileAccount`: a pure aligner over async read ports (count-conserving), plus downstream pure **sync** readers over the already-aligned dataset — all surface-don't-resolve.
 
 - **`ingest_and_align()` [BUILT]** — read the window's realized actuals (via `ActualsSource`) and that period's budget (via `BudgetSource`), align each actual 1:1 to the budget target it belongs to on the configured grain, and escalate everything that cannot align (an actual with no budget, a budget with no actual, a lump account-grain budget, an uncategorized-open line). Returns the graded `AlignedDataset`; both realized rungs flow through unchanged, each pair carrying the actual's grade verbatim. Slice 1.
-- **`flag_variance()` [PLANNED]** — compute the actual-vs-budget variance for each aligned pair and surface those over `varianceThresholds`. Detection / advisory only — it flags a gap, it never acts on one. Slice 2.
+- **`flag_variance()` [BUILT]** — read the aligned pairs and, for each, compute the signed exact-`Decimal` actual-vs-budget delta, surfacing those whose magnitude is strictly over the `variance_floor` (classified over-/under-budget, each flag carrying the pair's certainty grade verbatim and both `source_ref`s). Detection / advisory only — it flags a gap, it never acts on one; a pure, **sync** reader that drives no port and is non-forecasting (§2: a snapshot delta, no trend/run-rate/EAC, `budget.amount` verbatim). Slice 2.
 - **`build_report()` [PLANNED]** — assemble the periodic FP&A review package (aligned pairs + variances + escalations) to the instance's report shape (Contract A). Slice 3.
 - **`explain_variance()` [PLANNED]** — attach a source-linked, traceable narrative to each surfaced variance (which lines drove it, at what grade). Slice 4.
 
@@ -66,7 +66,7 @@ Anchored to where an analyst's output carries consequence: every figure it surfa
 1. **Unmapped lines** → surface + notify. An actual with no matching budget (spend the plan did not anticipate), a budget with no matching actual, or a **lump account-grain budget** whose allocation across attribution-grain actuals is a human judgment — never guessed, never padded with a fabricated zero.
 2. **Uncategorized-open actuals** → surface. An adapter-surfaced open line with no resolved account is the **capture-completeness signal** — a hole in the books a forward-looking analyst must flag, kept and surfaced, never dropped.
 3. **Any figure entering the FP&A review package** → *proposed for the human's planning review, never auto-published.*
-4. **[Planned] Any variance over `varianceThresholds`** → surfaced for review even where the alignment was confident.
+4. **Any variance over the `variance_floor`** → surfaced for review even where the alignment was confident. Unset (or non-finite) → inert in the *inverted* sense: every non-zero variance surfaced, none suppressed.
 
 **Resolution is always human.** Detection writes nothing, so it is not an autonomy question; *resolution* always is, and resolution — allocating, filling, acting on a variance — is always the human's. The analyst never silently resolves what it surfaces, however small.
 

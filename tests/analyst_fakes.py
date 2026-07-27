@@ -3,11 +3,13 @@
 The jr-analyst counterpart to `tests/fakes.py` (the Bookkeeper's substrate),
 generalized to the analyst's smaller, **read-only** surface. Two kinds of thing:
 
-- **builders** (`an_actual`, `a_budget_line`, `make_config`) — construct the frozen
-  model rows and a live `AnalystConfig` with sensible, *aligned* defaults, so a
-  bare `an_actual()` and a bare `a_budget_line()` share the default alignment key
-  (`DEFAULT_ALIGN_ON` = `(account, period)`) and pair 1:1 with no ceremony. A test
-  overrides only the field it is exercising.
+- **builders** (`an_actual`, `a_budget_line`, `an_aligned_pair`,
+  `an_aligned_dataset`, `make_config`) — construct the frozen model rows, the
+  slice-1 `AlignedPair` / `AlignedDataset` a slice-2 skill consumes directly, and a
+  live `AnalystConfig` with sensible, *aligned* defaults, so a bare `an_actual()`
+  and a bare `a_budget_line()` share the default alignment key
+  (`DEFAULT_ALIGN_ON` = `(account, period)`) and pair 1:1 into a ready-made -200.00
+  variance with no ceremony. A test overrides only the field it is exercising.
 - **fakes** (`FakeActualsSource`, `FakeBudgetSource`) — in-memory implementations of
   the read-only source ports, each recording `self.fetched: list[str]` (the windows
   / periods requested, in order) so a test can prove the skill only ever *read*, and
@@ -26,7 +28,14 @@ from __future__ import annotations
 from decimal import Decimal
 
 from jr_analyst.config import AnalystConfig
-from jr_analyst.model import ActualLine, BudgetLine, Certainty
+from jr_analyst.model import (
+    ActualLine,
+    AlignedDataset,
+    AlignedPair,
+    BudgetLine,
+    Certainty,
+    UnmappedLine,
+)
 from jr_analyst.ports import ActualsSource, BudgetSource
 
 # Aligned defaults — a bare actual and a bare budget line share these, so they
@@ -94,13 +103,59 @@ def a_budget_line(
     )
 
 
+def an_aligned_pair(
+    *,
+    actual: ActualLine = an_actual(),
+    budget: BudgetLine = a_budget_line(),
+) -> AlignedPair:
+    """Build a 1:1 `AlignedPair` — a bare call is a ready-made **-200.00** variance.
+
+    The slice-1 output slice 2 consumes directly: `flag_variance` reads
+    `AlignedPair`s, not raw ports, so a variance test builds the pair here and
+    never re-runs `ingest_and_align`. A bare call pairs a bare `an_actual()`
+    (1000.00) with a bare `a_budget_line()` (1200.00) — the two carry the same
+    default alignment key — so the signed `actual.amount - budget.amount` delta is
+    **-200.00**, an under-budget variance, with zero ceremony. Override one side to
+    exercise a different sign or magnitude
+    (`actual=an_actual(amount=Decimal("1500.00"))` → +300.00 over-budget). No
+    `certainty` kwarg: the pair derives its grade from `actual.certainty` as a
+    property, so it can never drift. The default rows are frozen (immutable), so
+    reusing the shared default instance across calls is safe.
+    """
+    return AlignedPair(actual=actual, budget=budget)
+
+
+def an_aligned_dataset(
+    *,
+    aligned: tuple[AlignedPair, ...] = (an_aligned_pair(),),
+    unmapped: tuple[UnmappedLine, ...] = (),
+    window: str = DEFAULT_PERIOD,
+) -> AlignedDataset:
+    """Build an `AlignedDataset` — a bare call carries one ready-made -200.00 pair.
+
+    The whole slice-1 result, built directly for a slice-2 test with no re-run of
+    `ingest_and_align`. A bare call holds a single `an_aligned_pair()` (the -200.00
+    under-budget pair) and no `unmapped` lines, over the `DEFAULT_PERIOD` window —
+    enough to drive `flag_variance` end to end with nothing to set up. Pass
+    `aligned=()` for the empty-dataset case, `aligned=(...)` with several pairs to
+    exercise ordering, or `unmapped=(...)` to prove `flag_variance` never reads the
+    escalated remainder. `window=` labels the analysis window carried onto the
+    result. The default tuples are immutable, so the shared defaults are safe to
+    reuse across calls.
+    """
+    return AlignedDataset(window=window, aligned=aligned, unmapped=unmapped)
+
+
 def make_config(**overrides: object) -> AnalystConfig:
     """A live, fail-fast-validated `AnalystConfig`; override any field.
 
     Mirrors `tests/fakes.py::make_config`. The one required field
-    (`budget_source_ref`) is supplied generically; pass `align_on=(...)` to exercise
-    a finer alignment grain. Goes through `from_mapping`, so overriding
-    `budget_source_ref` with a blank value exercises the fail-fast path.
+    (`budget_source_ref`) is supplied generically; every override is threaded
+    through `from_mapping` verbatim, so `align_on=(...)` exercises a finer alignment
+    grain and `variance_floor=` (a `Decimal`/`str`/`int`, coerced to exact `Decimal`
+    on the way through) sets the slice-2 materiality floor — an unset floor stays
+    `None` (inert). Overriding `budget_source_ref` with a blank value exercises the
+    fail-fast path.
     """
     base: dict[str, object] = dict(budget_source_ref="generic-budget-source")
     base.update(overrides)

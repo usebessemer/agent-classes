@@ -35,7 +35,13 @@ from jr_analyst.model import (
     UnmappedLine,
 )
 from jr_analyst.ports import ActualsSource, BudgetSource
-from jr_analyst.skills import ingest_and_align
+from jr_analyst.skills import (
+    VarianceFlag,
+    VarianceKind,
+    VarianceReport,
+    flag_variance,
+    ingest_and_align,
+)
 
 __all__ = [
     # data model (the frozen surface for slice 1)
@@ -59,4 +65,8 @@ __all__ = [
     "DEFAULT_ALIGN_ON",
     # skills (the charter computation surface; read-only, one module each)
     "ingest_and_align",
+    "flag_variance",
+    "VarianceReport",
+    "VarianceFlag",
+    "VarianceKind",
 ]

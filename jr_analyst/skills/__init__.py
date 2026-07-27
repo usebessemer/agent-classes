@@ -13,10 +13,25 @@ The v1 build lands here one skill at a time. Built so far:
   `AlignedDataset`, per the read-only boundary it writes nothing canonical.
   Reads via `ActualsSource` + `BudgetSource`; alignment grain from
   `config.align_on`.
+- `flag_variance` — the per-pair watchdog: read the aligned pairs and surface
+  each material actual-vs-budget variance (signed exact-`Decimal` delta, over/
+  under classification) above the materiality floor (charter `flagVariance`,
+  §3/§5.4). A pure, **sync** reader (it drives no port); returns a
+  `VarianceReport`, proposes-not-writes, non-forecasting.
 """
 
+from jr_analyst.skills.flag_variance import (
+    VarianceFlag,
+    VarianceKind,
+    VarianceReport,
+    flag_variance,
+)
 from jr_analyst.skills.ingest_and_align import ingest_and_align
 
 __all__ = [
     "ingest_and_align",
+    "flag_variance",
+    "VarianceReport",
+    "VarianceFlag",
+    "VarianceKind",
 ]
