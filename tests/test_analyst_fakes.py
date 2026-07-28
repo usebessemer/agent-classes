@@ -20,22 +20,33 @@ import pytest
 from jr_analyst.config import AnalystConfig, DEFAULT_ALIGN_ON
 from jr_analyst.model import ActualLine, AlignedDataset, BudgetLine, Certainty
 from jr_analyst.ports import ActualsSource, BudgetSource
-from jr_analyst.skills.flag_variance import VarianceFlag, VarianceKind, VarianceReport
+from jr_analyst.skills.build_report import PackageStatus, ReportPackage, TargetRollup
+from jr_analyst.skills.flag_variance import (
+    VarianceFlag,
+    VarianceKind,
+    VarianceReport,
+    flag_variance,
+)
 
 from tests.analyst_fakes import (
+    COVERAGE_MIX_FLOOR,
     DEFAULT_PERIOD,
     DEFAULT_TARGET,
     SECOND_TARGET,
     FakeActualsSource,
     FakeBudgetSource,
     a_budget_line,
+    a_coverage_mix_package,
     a_cross_target_budget_pair,
+    a_mixed_grade_multi_target_package,
     a_multi_grade_pairs,
     a_multi_target_dataset,
+    a_report_package,
     a_target_pair,
     a_variance_flag,
     a_variance_report,
     an_actual,
+    an_aligned_dataset,
     an_aligned_pair,
     make_config,
     some_variance_flags,
@@ -312,3 +323,99 @@ def test_variance_report_grade_separation_substrate():
     # one target, two grades: a naive cross-grade sum would be +300 + (-800) = -500,
     # but each grade rides through so a roll-up can keep them separate.
     assert {f.pair.actual.attribution_target_id for f in report.flags} == {"target-010"}
+
+
+# --- slice-4 builders: composed `ReportPackage` fixtures ---------------------
+# Each test pins one AC bullet of issue #80 — the composed-package substrate the
+# slice-4 (`explain_variance`) skill consumes. The builders run the *shipped*
+# `build_report`, so the fixtures track the real slice-3 shape and never
+# re-implement the roll-up; the slice-1/-2/-3 builders above stay untouched.
+
+
+def test_a_report_package_is_a_real_build_report_output():
+    """AC: a real `ReportPackage` from the shipped `build_report`, not a hand-forged dataclass."""
+    pkg = a_report_package()
+    assert isinstance(pkg, ReportPackage)
+    assert pkg.status is PackageStatus.PROPOSED
+    assert all(isinstance(rollup, TargetRollup) for rollup in pkg.rollup)
+    assert all(isinstance(flag, VarianceFlag) for flag in pkg.variances)
+    # a bare call composes the single -200.00 pair into a one-target package
+    assert pkg.summary.aligned_pairs == 1 and len(pkg.rollup) == 1
+    assert pkg.variances[0].delta == Decimal("-200.00")
+
+
+def test_a_report_package_composes_the_given_dataset_and_report_verbatim():
+    """The package carries the input `dataset.aligned` / `report.flags` VERBATIM (same objects)."""
+    ds = a_multi_target_dataset(window="2026-Q2-rollup")
+    report = a_variance_report(pairs=ds.aligned, window="2026-Q2-rollup")
+    pkg = a_report_package(dataset=ds, variance_report=report)
+    assert pkg.pairs is ds.aligned  # same tuple, nothing re-struck
+    assert pkg.variances is report.flags  # the report carried in verbatim
+    assert pkg.window == "2026-Q2-rollup"
+    assert len(pkg.rollup) == 2  # spans the two targets, roll-up run by build_report
+
+
+def test_a_report_package_default_report_shares_the_dataset_window():
+    """The derived default report takes the dataset's own window, so build_report never fails fast."""
+    ds = an_aligned_dataset(window="2026-Q3")
+    pkg = a_report_package(dataset=ds)  # report omitted -> derived from ds, windows agree
+    assert pkg.window == "2026-Q3"
+    assert len(pkg.variances) == len(ds.aligned)
+
+
+def test_coverage_mix_rollup_carries_both_pairs_but_only_over_floor_is_flagged():
+    """AC: the target's roll-up holds BOTH pairs; only the over-floor flag lands in `variances`."""
+    pkg = a_coverage_mix_package()
+    (rollup,) = pkg.rollup  # exactly one target
+    assert rollup.attribution_target_id == DEFAULT_TARGET
+    assert len(rollup.pairs) == 2  # both the over- and the sub-floor pair rolled up
+    assert len(pkg.variances) == 1  # only the over-floor pair is flagged
+    assert pkg.variances[0].delta == Decimal("300.00")
+
+
+def test_coverage_mix_subfloor_remainder_is_non_zero_and_equals_the_unflagged_delta():
+    """AC: a downstream `subfloor_remainder` is non-zero and equals the unflagged pair's signed delta."""
+    pkg = a_coverage_mix_package()
+    (rollup,) = pkg.rollup
+    flagged = [flag.pair for flag in pkg.variances]
+    subfloor_pairs = [pair for pair in rollup.pairs if pair not in flagged]
+    assert len(subfloor_pairs) == 1  # the sub-floor pair is the unflagged remainder
+    subfloor_remainder = sum(
+        (pair.actual.amount - pair.budget.amount for pair in subfloor_pairs), Decimal("0")
+    )
+    assert subfloor_remainder == Decimal("50.00")  # equals the unflagged pair's delta
+    assert subfloor_remainder != Decimal("0")  # ...and is genuinely non-zero (exercised)
+
+
+def test_coverage_mix_amounts_are_coherent_with_the_nominal_floor():
+    """The amounts straddle `COVERAGE_MIX_FLOOR`: a real `flag_variance` at that floor surfaces exactly the over-floor pair."""
+    pkg = a_coverage_mix_package()
+    dataset = an_aligned_dataset(aligned=pkg.pairs, window=pkg.window)
+    report = flag_variance(dataset, make_config(variance_floor=COVERAGE_MIX_FLOOR))
+    # exactly the over-floor pair clears the floor — the sub-floor pair is suppressed
+    assert [flag.pair for flag in report.flags] == [pkg.variances[0].pair]
+    assert pkg.pairs[1] not in [flag.pair for flag in report.flags]
+
+
+def test_mixed_grade_multi_target_package_spans_two_targets_one_multi_grade():
+    """AC: a package spanning two targets, the first carrying two certainty grades, all pairs flagged."""
+    pkg = a_mixed_grade_multi_target_package()
+    assert isinstance(pkg, ReportPackage)
+    assert [rollup.attribution_target_id for rollup in pkg.rollup] == [
+        DEFAULT_TARGET,
+        SECOND_TARGET,
+    ]  # targets sorted by id
+    default_rollup = next(
+        rollup for rollup in pkg.rollup if rollup.attribution_target_id == DEFAULT_TARGET
+    )
+    grades = {sub.certainty for sub in default_rollup.actual_by_certainty}
+    assert grades == {Certainty.REALIZED_CLOSED, Certainty.REALIZED_OPEN}  # two grades, no blend
+    assert len(pkg.variances) == len(pkg.pairs) == 3  # every pair flagged
+
+
+def test_mixed_grade_multi_target_magnitudes_are_distinct_for_a_clean_ranking():
+    """Distinct `abs(delta)` per flag, so a downstream per-target ranking is deterministic."""
+    pkg = a_mixed_grade_multi_target_package()
+    magnitudes = sorted(abs(flag.delta) for flag in pkg.variances)
+    assert magnitudes == [Decimal("200.00"), Decimal("300.00"), Decimal("800.00")]
+    assert len(set(magnitudes)) == 3  # all distinct — no ranking tie to resolve
