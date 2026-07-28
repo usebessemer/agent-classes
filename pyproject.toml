@@ -20,6 +20,14 @@ test = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.24.0",
 ]
+# mypy is pinned exactly (not floating) so the same version runs locally and in
+# CI. A floating mypy is what silently reclassified [arg-type] -> [call-overload]
+# in #34, going unnoticed because CI ran pytest only; bumping this pin is now a
+# deliberate, reviewed change. The framework ships py.typed (#27), so staying
+# type-clean is a shipped contract to consumers, not just internal hygiene.
+typecheck = [
+  "mypy==2.3.0",
+]
 
 [tool.setuptools]
 # jr_analyst ships as a flat second package in this same distribution — no
