@@ -146,6 +146,36 @@ def test_no_jr_analyst_version_added():
     assert not hasattr(jr_analyst, "__version__")
 
 
+# The full slice-4 surface #82 dual-exports: the operation + its inline result model.
+_SLICE4_PUBLIC_SURFACE = (
+    "explain_variance",
+    "VarianceDriver",
+    "TargetExplanation",
+    "ExplainedPackage",
+)
+
+
+def test_explain_variance_surface_is_dual_exported_from_both_paths():
+    # #82 AC: the whole slice-4 surface re-exports through BOTH `jr_analyst.skills` and
+    # `jr_analyst` — present as an attribute, in each `__all__`, and the SAME object as
+    # the skill-module definition (no shadow re-declaration). Both import paths must
+    # resolve to one surface. The canonical objects are this module's own top-level
+    # `from jr_analyst.skills.explain_variance import ...` names (that form always reads
+    # the real submodule, unshadowed by the package re-export). Mirrors
+    # `test_build_report.py::test_build_report_surface_is_dual_exported_from_both_paths`.
+    import jr_analyst
+    import jr_analyst.skills as skills_pkg
+
+    canonical = globals()
+    for name in _SLICE4_PUBLIC_SURFACE:
+        for package in (skills_pkg, jr_analyst):
+            assert hasattr(package, name), f"{name} not exported from {package.__name__}"
+            assert name in package.__all__, f"{name} missing from {package.__name__}.__all__"
+            assert getattr(package, name) is canonical[name], (
+                f"{package.__name__}.{name} is not the skill-module object"
+            )
+
+
 # --- struck target variance + kind + carried referents -----------------------
 
 

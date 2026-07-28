@@ -37,15 +37,19 @@ from jr_analyst.model import (
 from jr_analyst.ports import ActualsSource, BudgetSource
 from jr_analyst.skills import (
     CertaintySubtotal,
+    ExplainedPackage,
     PackageStatus,
     PackageSummary,
     ReportBasis,
     ReportPackage,
+    TargetExplanation,
     TargetRollup,
+    VarianceDriver,
     VarianceFlag,
     VarianceKind,
     VarianceReport,
     build_report,
+    explain_variance,
     flag_variance,
     ingest_and_align,
 )
@@ -84,4 +88,9 @@ __all__ = [
     "PackageSummary",
     "ReportBasis",
     "PackageStatus",
+    "explain_variance",
+    # explain_variance's deterministic explanation model (struck + ranked + graded)
+    "VarianceDriver",
+    "TargetExplanation",
+    "ExplainedPackage",
 ]
