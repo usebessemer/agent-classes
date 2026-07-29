@@ -15,7 +15,12 @@ generalized to the analyst's smaller, **read-only** surface. Two kinds of thing:
   `a_cross_target_budget_pair`, and the `a_variance_flag` / `some_variance_flags`
   / `a_variance_report` set that hand-builds a coherent `VarianceReport` for a
   `build_report` test *without* re-running `flag_variance` — all reusing these
-  defaults, never changing the bare -200.00 builders.
+  defaults, never changing the bare -200.00 builders. Slice 4 layers the
+  composed-package builders — `a_report_package` (a *real* `ReportPackage` run
+  through the shipped `build_report`, never a hand-forged dataclass),
+  `a_coverage_mix_package` (an over-floor flagged pair + a sub-floor unflagged one,
+  so a `subfloor_remainder` is non-zero), and `a_mixed_grade_multi_target_package`
+  (two targets, one carrying two grades) — on the slice-3 builders, still untouched.
 - **fakes** (`FakeActualsSource`, `FakeBudgetSource`) — in-memory implementations of
   the read-only source ports, each recording `self.fetched: list[str]` (the windows
   / periods requested, in order) so a test can prove the skill only ever *read*, and
@@ -44,6 +49,7 @@ from jr_analyst.model import (
     UnmappedLine,
 )
 from jr_analyst.ports import ActualsSource, BudgetSource
+from jr_analyst.skills.build_report import ReportPackage, build_report
 from jr_analyst.skills.flag_variance import (
     VarianceFlag,
     VarianceKind,
@@ -427,6 +433,132 @@ def a_variance_report(
         else some_variance_flags(pairs if pairs is not None else (an_aligned_pair(),))
     )
     return VarianceReport(window=window, flags=tuple(resolved))
+
+
+# --- slice-4 substrate: composed `ReportPackage` fixtures --------------------
+# The builders a slice-4 (`explain_variance`) test needs: a *real* `ReportPackage`
+# composed by the shipped `build_report` (never a hand-forged dataclass, so the
+# fixtures track the true slice-3 shape — `rollup`, `variances`, `escalations`,
+# `status=PROPOSED`), plus the two scenarios slice 4 exercises — a coverage-mix
+# target (an over-floor flagged pair + a sub-floor *unflagged* pair, so a
+# `subfloor_remainder` is non-zero) and a mixed-grade multi-target package (so
+# ranking and per-target grouping have something to bite on). All layered on the
+# slice-1/-2/-3 builders above; the bare -200.00 builders stay untouched.
+
+#: The nominal materiality floor the coverage-mix amounts straddle: the over-floor
+#: pair's `abs(delta)` clears it and the sub-floor pair's does not, so running the
+#: shipped `flag_variance` at this floor surfaces **exactly** the over-floor pair
+#: (proven in `test_analyst_fakes.py`). The composed package does not carry the
+#: floor — the hand-built report flags the over-floor pair directly — so this is a
+#: coherence anchor, not a field on the result.
+COVERAGE_MIX_FLOOR = Decimal("100.00")
+
+
+def a_report_package(
+    *,
+    dataset: AlignedDataset | None = None,
+    variance_report: VarianceReport | None = None,
+    config: AnalystConfig | None = None,
+) -> ReportPackage:
+    """A real `ReportPackage` composed by the shipped `build_report` — no re-implemented roll-up.
+
+    The slice-4 counterpart to slice-3's `a_variance_report`: where that hand-builds
+    a coherent `VarianceReport` *without* running `flag_variance`, this composes a
+    real `ReportPackage` *with* the shipped `build_report`, so an `explain_variance`
+    test gets a package input that tracks the true slice-3 shape (`rollup`,
+    `variances`, `escalations`, `status=PackageStatus.PROPOSED`) rather than a
+    hand-forged dataclass that could drift from it. A bare call composes the single
+    -200.00 pair (one under-budget flag) into a one-target package. Pass `dataset` /
+    `variance_report` for a bespoke package; when `variance_report` is omitted it is
+    derived from the dataset's own pairs *and window*, so the two always describe the
+    same analysis window (`build_report` fails fast on a mismatch). `config` defaults
+    to `make_config()` — its `align_on` rides onto the package as grain metadata.
+    """
+    resolved_dataset = dataset if dataset is not None else an_aligned_dataset()
+    resolved_report = (
+        variance_report
+        if variance_report is not None
+        else a_variance_report(
+            pairs=resolved_dataset.aligned, window=resolved_dataset.window
+        )
+    )
+    resolved_config = config if config is not None else make_config()
+    return build_report(resolved_dataset, resolved_report, resolved_config)
+
+
+def a_coverage_mix_package(
+    *,
+    target: str = DEFAULT_TARGET,
+    over_floor_actual: Decimal = Decimal("1500.00"),
+    over_floor_budget: Decimal = Decimal("1200.00"),
+    subfloor_actual: Decimal = Decimal("1050.00"),
+    subfloor_budget: Decimal = Decimal("1000.00"),
+    window: str = DEFAULT_PERIOD,
+    config: AnalystConfig | None = None,
+) -> ReportPackage:
+    """A one-target package whose roll-up carries BOTH an over- and a sub-floor pair, only the first flagged.
+
+    The coverage-mix scenario a `subfloor_remainder` test needs: a single `target`
+    carrying two aligned pairs — an over-floor pair (default +300.00, `abs(delta)`
+    over `COVERAGE_MIX_FLOOR`) that **is** flagged, and a sub-floor pair (default
+    +50.00, below the floor but non-zero) that is **not**. Both land in the same
+    target's roll-up (`len(rollup.pairs) == 2`, since the roll-up groups *every*
+    aligned pair), but `package.variances` carries only the over-floor flag — built
+    via `a_variance_report(flags=some_variance_flags((over_floor_pair,)))` — so a
+    downstream `subfloor_remainder` is **non-zero** and equals the unflagged pair's
+    signed delta. Both pairs come from `a_target_pair` (distinct `tag`s → distinct
+    `source_ref`s); override the amounts to move either side of the floor.
+    """
+    over_floor_pair = a_target_pair(
+        target,
+        tag="over",
+        actual_amount=over_floor_actual,
+        budget_amount=over_floor_budget,
+    )
+    subfloor_pair = a_target_pair(
+        target,
+        tag="sub",
+        actual_amount=subfloor_actual,
+        budget_amount=subfloor_budget,
+    )
+    dataset = an_aligned_dataset(aligned=(over_floor_pair, subfloor_pair), window=window)
+    variance_report = a_variance_report(
+        flags=some_variance_flags((over_floor_pair,)), window=window
+    )
+    return a_report_package(
+        dataset=dataset, variance_report=variance_report, config=config
+    )
+
+
+def a_mixed_grade_multi_target_package(
+    *,
+    window: str = DEFAULT_PERIOD,
+    config: AnalystConfig | None = None,
+) -> ReportPackage:
+    """A package spanning two targets, one carrying two certainty grades — ranking + grouping fodder.
+
+    The scenario slice-4 ranking and per-target grouping need: the first target
+    (`DEFAULT_TARGET`) carries the two `a_multi_grade_pairs` rows — a
+    `realized_closed` +300.00 and a `realized_open` -800.00 — so a per-target driver
+    ranking has two distinct grades *and* two distinct magnitudes to order (open
+    `abs 800` ranks over closed `abs 300`); the second target (`SECOND_TARGET`)
+    carries the multi-target dataset's own +200.00 pair, so grouping spans two targets
+    with a third distinct magnitude. Every pair is flagged (`some_variance_flags`), so
+    the `variances` cover all three and none fall sub-floor — the companion to
+    `a_coverage_mix_package`.
+    """
+    closed, open_pair = a_multi_grade_pairs(target=DEFAULT_TARGET)
+    second_target_pairs = tuple(
+        pair
+        for pair in a_multi_target_dataset(window=window).aligned
+        if pair.actual.attribution_target_id == SECOND_TARGET
+    )
+    pairs = (closed, open_pair) + second_target_pairs
+    dataset = an_aligned_dataset(aligned=pairs, window=window)
+    variance_report = a_variance_report(flags=some_variance_flags(pairs), window=window)
+    return a_report_package(
+        dataset=dataset, variance_report=variance_report, config=config
+    )
 
 
 class FakeActualsSource(ActualsSource):

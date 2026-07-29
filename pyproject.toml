@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bookkeeper"
-version = "0.5.0"
+version = "0.6.0"
 description = "The Bessemer Bookkeeper agent-class framework: the adapter-agnostic core (skill ports, the Standing-executor orchestrator with the §5 fail-safe, the §3 config schema, and the Contract A/B interfaces)."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -19,6 +19,14 @@ dependencies = []
 test = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.24.0",
+]
+# mypy is pinned exactly (not floating) so the same version runs locally and in
+# CI. A floating mypy is what silently reclassified [arg-type] -> [call-overload]
+# in #34, going unnoticed because CI ran pytest only; bumping this pin is now a
+# deliberate, reviewed change. The framework ships py.typed (#27), so staying
+# type-clean is a shipped contract to consumers, not just internal hygiene.
+typecheck = [
+  "mypy==2.3.0",
 ]
 
 [tool.setuptools]

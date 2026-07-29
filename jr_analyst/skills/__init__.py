@@ -27,6 +27,17 @@ The v1 build lands here one skill at a time. Built so far:
   Its inline frozen result model (`ReportPackage` / `TargetRollup` /
   `CertaintySubtotal` / `PackageSummary` / `ReportBasis` / `PackageStatus`)
   re-exports here alongside the operation.
+- `explain_variance` — the deterministic narrative substrate (Option A): read a
+  composed `ReportPackage` and strike the story `build_report` deferred — per
+  target it **differences** the actuals-to-date against the summed referents into
+  one signed `target_variance`, classifies its over/under `kind`, and **ranks**
+  the target's flagged variances into a full ordered list of `VarianceDriver`s
+  (largest `abs(delta)` first), disclosing the sub-floor remainder — charter
+  `explainVariance`, §4. Pure and **sync**, port-free; proposes-not-writes,
+  `PROPOSED`-only. Deterministic-only: it authors **no** prose (the LLM-narrative
+  rung is deferred) and forecasts **nothing** (§2). Its inline frozen result
+  model (`VarianceDriver` / `TargetExplanation` / `ExplainedPackage`) re-exports
+  here alongside the operation.
 """
 
 from jr_analyst.skills.build_report import (
@@ -37,6 +48,12 @@ from jr_analyst.skills.build_report import (
     ReportPackage,
     TargetRollup,
     build_report,
+)
+from jr_analyst.skills.explain_variance import (
+    ExplainedPackage,
+    TargetExplanation,
+    VarianceDriver,
+    explain_variance,
 )
 from jr_analyst.skills.flag_variance import (
     VarianceFlag,
@@ -59,4 +76,8 @@ __all__ = [
     "PackageSummary",
     "ReportBasis",
     "PackageStatus",
+    "explain_variance",
+    "VarianceDriver",
+    "TargetExplanation",
+    "ExplainedPackage",
 ]

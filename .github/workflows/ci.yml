@@ -29,3 +29,23 @@ jobs:
 
       - name: Run tests
         run: pytest
+
+  typecheck:
+    name: mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Type-check against the requires-python floor — the minimum we ship.
+          python-version: "3.12"
+
+      # The [typecheck] extra pins mypy exactly so local and CI agree; a floating
+      # mypy is what silently reclassified [arg-type] -> [call-overload] in #34.
+      - name: Install
+        run: pip install -e ".[typecheck]"
+
+      - name: Type-check
+        run: mypy bookkeeper/ jr_analyst/
